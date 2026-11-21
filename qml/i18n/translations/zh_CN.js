@@ -111,6 +111,8 @@ var strings = {
         "info.controllerTitle": "控制器详情",
         "info.waiting": "等待读取设备信息",
         "info.controllerSource": "信息由 lecoo-ctrl info 提供",
+        "info.batteryTitle": "电池信息",
+        "info.batteryUnavailable": "暂无电池信息，请刷新。此功能需要支持电池查询的设备及 lecoo-ctrl 0.6.0 或更新版本。",
         "info.connection": "连接状态",
         "info.os": "操作系统",
         "info.connected": "已连接",

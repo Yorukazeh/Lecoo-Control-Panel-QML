@@ -149,6 +149,7 @@ pub mod qobject {
         #[qproperty(i32, gpu_fan_rpm, cxx_name = "gpuFanRpm")]
         #[qproperty(QString, power_profile, cxx_name = "powerProfile")]
         #[qproperty(QString, controller_info, cxx_name = "controllerInfo")]
+        #[qproperty(QString, battery_info, cxx_name = "batteryInfo")]
         #[qproperty(QString, os_info, cxx_name = "osInfo")]
         #[qproperty(QString, os_version, cxx_name = "osVersion")]
         #[qproperty(QString, status_message, cxx_name = "statusMessage")]
@@ -267,6 +268,7 @@ pub struct ControlCenterRust {
     gpu_fan_rpm: i32,
     power_profile: QString,
     controller_info: QString,
+    battery_info: QString,
     os_info: QString,
     os_version: QString,
     status_message: QString,
@@ -292,6 +294,7 @@ impl Default for ControlCenterRust {
             gpu_fan_rpm: 0,
             power_profile: QString::default(),
             controller_info: QString::default(),
+            battery_info: QString::default(),
             os_info: qobject::os_product_name(),
             os_version: qobject::os_kernel_version(),
             status_message: QString::default(),
@@ -486,6 +489,12 @@ fn qstring(value: impl Into<String>) -> QString {
     QString::from(value.into())
 }
 
+fn battery_details(output: &str) -> &str {
+    // The card already has a title; all upstream locales prefix the CLI heading with 🔋.
+    let (first, rest) = output.split_once('\n').unwrap_or((output, ""));
+    if first.trim_start().starts_with('🔋') { rest.trim_end() } else { output }
+}
+
 /// Return a compiled-in legal document by name.
 fn legal_document_text(name: &str) -> &'static str {
     match name {
@@ -576,6 +585,11 @@ impl qobject::ControlCenter {
 
     pub fn refresh_info(mut self: Pin<&mut Self>) {
         self.as_mut().begin();
+        // An unsupported battery query must not affect the controller connection status.
+        self.as_mut().run_async(
+            || run_cli(&["battery"]).unwrap_or_default(),
+            |mut obj, output| obj.as_mut().set_battery_info(qstring(battery_details(&output))),
+        );
         self.run_async(
             || run_cli(&["info"]),
             |mut obj, result| match result {
@@ -1047,6 +1061,17 @@ impl qobject::ControlCenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn battery_details_omits_only_the_cli_heading() {
+        assert_eq!(
+            battery_details("🔋 电池:\n   电量: 80%\n   健康度: 100%"),
+            "   电量: 80%\n   健康度: 100%"
+        );
+        assert_eq!(battery_details("🔋 Battery:\r\n   Health: 100%"), "   Health: 100%");
+        assert_eq!(battery_details("Health: 100%"), "Health: 100%");
+        assert_eq!(battery_details("🔋 Battery:"), "");
+    }
 
     #[test]
     fn monitor_updates_split_on_carriage_returns_and_newlines() {

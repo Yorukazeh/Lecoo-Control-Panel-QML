@@ -1581,6 +1581,21 @@ ApplicationWindow {
                     }
                 }
 
+                Card {
+                    Layout.fillWidth: true
+                    title: I18n.t("info.batteryTitle")
+                    leadingIcon: "battery_charging_full"
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: backend.batteryInfo.length > 0 ? backend.batteryInfo : I18n.t("info.batteryUnavailable")
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        color: Appearance.colors.colOnSurface
+                        font.pixelSize: 14
+                    }
+                }
+
                 GridLayout {
                     Layout.fillWidth: true
                     columns: appWindow.pageAvailableWidth < 760 ? 2 : 4

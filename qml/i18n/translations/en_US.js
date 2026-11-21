@@ -111,6 +111,8 @@ var strings = {
         "info.controllerTitle": "Controller details",
         "info.waiting": "Waiting for device information",
         "info.controllerSource": "Provided by lecoo-ctrl info",
+        "info.batteryTitle": "Battery information",
+        "info.batteryUnavailable": "No battery information available. Try refreshing. This feature requires supported hardware and lecoo-ctrl 0.6.0 or later.",
         "info.connection": "Connection",
         "info.os": "Operating System",
         "info.connected": "Connected",
