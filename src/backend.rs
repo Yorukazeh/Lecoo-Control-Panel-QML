@@ -20,6 +20,19 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Highest fan PWM value accepted by the CLI.
 const FAN_PWM_MAX: i32 = 220;
+const LED_PRESETS: &[&str] = &[
+    "smooth",
+    "sleep",
+    "alert",
+    "zen",
+    "ping",
+    "energetic",
+    "warning",
+    "vacuum",
+    "panic",
+    "sonar",
+    "toxic",
+];
 
 /// A long-running CLI monitor process and the handle needed to stop it.
 struct MonitorProcess {
@@ -206,7 +219,11 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "applyLedMode"]
-        fn apply_led_mode(self: Pin<&mut Self>, mode: &QString, pwm: i32);
+        fn apply_led_mode(self: Pin<&mut Self>, mode: &QString, value: i32, preset: &QString, sleep: bool);
+
+        #[qinvokable]
+        #[cxx_name = "ledPresets"]
+        fn led_presets(&self) -> QStringList;
 
         #[qinvokable]
         #[cxx_name = "refreshCliInfo"]
@@ -483,6 +500,28 @@ fn monitoring_values(line: &str) -> Option<(i32, i32, i32, i32)> {
 fn now_label() -> String {
     let now = QTime::current_time();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+fn led_args(mode: &str, value: i32, preset: &str, sleep: bool) -> Option<Vec<String>> {
+    let mut args = vec!["led".to_owned()];
+    if sleep {
+        args.push("sleep".to_owned());
+    }
+    args.push(mode.to_owned());
+    match mode {
+        "auto" => {}
+        "custom" => args.push(value.clamp(0, 255).to_string()),
+        "breath" if LED_PRESETS.contains(&preset) => args.push(preset.to_owned()),
+        "flash" if !sleep && LED_PRESETS.contains(&preset) && (1..=65_535).contains(&value) => {
+            args.extend([preset.to_owned(), "--for".to_owned(), format!("{:.3}", f64::from(value) / 1000.0)]);
+        }
+        "overheat" if !sleep && (0..=255).contains(&value) => {
+            let threshold = if value == 0 { "off".to_owned() } else { value.to_string() };
+            return Some(vec!["daemon".to_owned(), "overheat".to_owned(), threshold]);
+        }
+        _ => return None,
+    }
+    Some(args)
 }
 
 fn qstring(value: impl Into<String>) -> QString {
@@ -1033,26 +1072,37 @@ impl qobject::ControlCenter {
         );
     }
 
-    pub fn apply_led_mode(mut self: Pin<&mut Self>, mode: &QString, pwm: i32) {
-        let mode = String::from(mode);
-        if !matches!(mode.as_str(), "auto" | "custom") {
-            self.fail("backend.error.unsupported_led_mode");
-            return;
+    pub fn led_presets(&self) -> cxx_qt_lib::QStringList {
+        let mut presets = cxx_qt_lib::QStringList::default();
+        for preset in LED_PRESETS {
+            presets.append(qstring(*preset));
         }
+        presets
+    }
+
+    pub fn apply_led_mode(
+        mut self: Pin<&mut Self>,
+        mode: &QString,
+        value: i32,
+        preset: &QString,
+        sleep: bool,
+    ) {
+        let Some(args) = led_args(&mode.to_string(), value, &preset.to_string(), sleep) else {
+            self.as_mut().set_error_message(qstring("backend.error.unsupported_led_mode"));
+            return;
+        };
         self.as_mut().begin();
-        let pwm_text = pwm.clamp(0, 255).to_string();
-        let mode_arg = mode.clone();
         self.run_async(
             move || {
-                if mode_arg == "custom" {
-                    run_cli(&["led", &mode_arg, &pwm_text])
-                } else {
-                    run_cli(&["led", &mode_arg])
-                }
+                let args: Vec<_> = args.iter().map(String::as_str).collect();
+                run_cli(&args)
             },
-            |obj, result| match result {
+            |mut obj, result| match result {
                 Ok(_) => obj.finish("backend.status.led_applied"),
-                Err(error) => obj.fail(error),
+                Err(error) => {
+                    obj.as_mut().set_error_message(qstring(error));
+                    obj.finish("backend.error.operation_failed");
+                }
             },
         );
     }
@@ -1061,6 +1111,23 @@ impl qobject::ControlCenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn led_arguments_match_upstream_cli() {
+        assert_eq!(led_args("auto", 0, "", false).unwrap(), ["led", "auto"]);
+        assert_eq!(led_args("breath", 0, "smooth", false).unwrap(), ["led", "breath", "smooth"]);
+        assert_eq!(led_args("custom", 255, "", true).unwrap(), ["led", "sleep", "custom", "255"]);
+        assert_eq!(led_args("breath", 0, "sleep", true).unwrap(), ["led", "sleep", "breath", "sleep"]);
+        assert_eq!(
+            led_args("flash", 1500, "alert", false).unwrap(),
+            ["led", "flash", "alert", "--for", "1.500"]
+        );
+        assert_eq!(led_args("overheat", 95, "", false).unwrap(), ["daemon", "overheat", "95"]);
+        assert_eq!(led_args("overheat", 0, "", false).unwrap(), ["daemon", "overheat", "off"]);
+        assert!(led_args("breath", 0, "--help", false).is_none());
+        assert!(led_args("flash", 0, "alert", false).is_none());
+        assert!(led_args("flash", 1500, "alert", true).is_none());
+    }
 
     #[test]
     fn battery_details_omits_only_the_cli_heading() {

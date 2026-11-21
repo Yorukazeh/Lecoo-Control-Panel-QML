@@ -1270,11 +1270,24 @@ ApplicationWindow {
                 }
 
                 Card {
+                    id: ledCard
                     Layout.fillWidth: true
-                    implicitHeight: 214
                     title: I18n.t("led.title")
                     leadingIcon: "lightbulb"
                     subtitle: I18n.t("led.subtitle")
+
+                    readonly property var presets: backend.ledPresets()
+
+                    component LedChoice: ComboBox {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 240
+                        palette.base: Appearance.colors.colSurfaceContainerHighest
+                        palette.button: Appearance.colors.colSurfaceContainerHighest
+                        palette.text: Appearance.colors.colOnSurface
+                        palette.buttonText: Appearance.colors.colOnSurface
+                        palette.highlight: Appearance.colors.colPrimary
+                        palette.highlightedText: Appearance.colors.colOnPrimary
+                    }
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -1320,15 +1333,148 @@ ApplicationWindow {
                             variant: MaterialButton.Variant.Tonal
                             buttonText: I18n.t("led.auto")
                             buttonIcon: "auto_mode"
-                            onClicked: backend.applyLedMode("auto", 0)
+                            enabled: !backend.busy
+                            onClicked: backend.applyLedMode("auto", 0, "", false)
                         }
                         MaterialButton {
                             variant: MaterialButton.Variant.Filled
                             buttonText: I18n.t("action.apply")
                             buttonIcon: "check"
-                            onClicked: backend.applyLedMode("custom", appWindow.ledBrightness)
+                            enabled: !backend.busy
+                            onClicked: backend.applyLedMode("custom", appWindow.ledBrightness, "", false)
                         }
                         Item { Layout.fillWidth: true }
+                    }
+
+                    SettingsRow {
+                        title: I18n.t("led.breath")
+
+                        LedChoice {
+                            id: awakePreset
+                            model: ledCard.presets
+                            Accessible.name: I18n.t("led.breath")
+                        }
+                        MaterialButton {
+                            buttonText: I18n.t("action.apply")
+                            enabled: !backend.busy && awakePreset.currentIndex >= 0
+                            onClicked: backend.applyLedMode("breath", 0, awakePreset.currentText, false)
+                        }
+                    }
+
+                    Divider { }
+
+                    SettingsRow {
+                        title: I18n.t("led.sleep")
+                        subtitle: I18n.t("led.sleepHint")
+
+                        LedChoice {
+                            id: sleepMode
+                            model: [I18n.t("led.auto"), I18n.t("led.static"), I18n.t("led.breath")]
+                            Accessible.name: I18n.t("led.sleep")
+                        }
+                        MaterialButton {
+                            buttonText: I18n.t("action.apply")
+                            enabled: !backend.busy && sleepMode.currentIndex >= 0
+                                     && (sleepMode.currentIndex !== 2 || sleepPreset.currentIndex >= 0)
+                            onClicked: backend.applyLedMode(["auto", "custom", "breath"][sleepMode.currentIndex],
+                                                            sleepBrightness.value, sleepPreset.currentText, true)
+                        }
+                    }
+
+                    SettingsRow {
+                        visible: sleepMode.currentIndex === 1
+                        title: I18n.t("led.brightness")
+
+                        StyledSlider {
+                            id: sleepBrightness
+                            Layout.preferredWidth: 165
+                            from: 0
+                            to: 255
+                            stepSize: 1
+                            value: 128
+                            usePercentTooltip: false
+                            Accessible.name: I18n.t("led.brightness")
+                        }
+                        StyledText { text: sleepBrightness.value }
+                    }
+
+                    SettingsRow {
+                        visible: sleepMode.currentIndex === 2
+                        title: I18n.t("led.breath")
+
+                        LedChoice {
+                            id: sleepPreset
+                            model: ledCard.presets
+                            currentIndex: 1
+                            Accessible.name: I18n.t("led.breath")
+                        }
+                    }
+
+                    Divider { }
+
+                    SettingsRow {
+                        title: I18n.t("led.flash")
+                        subtitle: I18n.t("led.flashHint")
+
+                        LedChoice {
+                            id: flashPreset
+                            model: ledCard.presets
+                            currentIndex: 2
+                            Accessible.name: I18n.t("led.flash")
+                        }
+                        MaterialButton {
+                            buttonText: I18n.t("led.play")
+                            enabled: !backend.busy && flashPreset.currentIndex >= 0
+                            onClicked: backend.applyLedMode("flash", Math.round(flashDuration.value * 1000),
+                                                            flashPreset.currentText, false)
+                        }
+                    }
+
+                    SettingsRow {
+                        title: I18n.t("led.duration")
+
+                        StyledSlider {
+                            id: flashDuration
+                            Layout.preferredWidth: 165
+                            from: 0.5
+                            to: 65
+                            stepSize: 0.5
+                            value: 1.5
+                            tooltipContent: I18n.t("led.seconds", value.toFixed(1))
+                            Accessible.name: I18n.t("led.duration")
+                        }
+                        StyledText { text: flashDuration.tooltipContent }
+                    }
+
+                    Divider { }
+
+                    SettingsRow {
+                        title: I18n.t("led.overheat")
+                        subtitle: I18n.t("led.overheatHint")
+
+                        SpinBox {
+                            id: overheatThreshold
+                            from: 1
+                            to: 255
+                            value: 95
+                            editable: true
+                            palette.base: Appearance.colors.colSurfaceContainerHighest
+                            palette.button: Appearance.colors.colSurfaceContainerHighest
+                            palette.text: Appearance.colors.colOnSurface
+                            palette.buttonText: Appearance.colors.colOnSurface
+                            Accessible.name: I18n.t("led.overheat")
+                        }
+                        MaterialButton {
+                            variant: MaterialButton.Variant.Tonal
+                            buttonText: I18n.t("led.disable")
+                            enabled: !backend.busy
+                            onClicked: backend.applyLedMode("overheat", 0, "", false)
+                        }
+                        MaterialButton {
+                            buttonText: I18n.t("action.apply")
+                            enabled: !backend.busy
+                            onClicked: backend.applyLedMode("overheat", overheatThreshold.value, "", false)
+                        }
                     }
                 }
             }
