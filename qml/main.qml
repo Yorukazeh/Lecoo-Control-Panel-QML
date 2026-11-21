@@ -1278,15 +1278,9 @@ ApplicationWindow {
 
                     readonly property var presets: backend.ledPresets()
 
-                    component LedChoice: ComboBox {
+                    component LedChoice: StyledComboBox {
                         Layout.fillWidth: true
                         Layout.maximumWidth: 240
-                        palette.base: Appearance.colors.colSurfaceContainerHighest
-                        palette.button: Appearance.colors.colSurfaceContainerHighest
-                        palette.text: Appearance.colors.colOnSurface
-                        palette.buttonText: Appearance.colors.colOnSurface
-                        palette.highlight: Appearance.colors.colPrimary
-                        palette.highlightedText: Appearance.colors.colOnPrimary
                     }
 
                     RowLayout {
@@ -1458,11 +1452,74 @@ ApplicationWindow {
                             to: 255
                             value: 95
                             editable: true
-                            palette.base: Appearance.colors.colSurfaceContainerHighest
-                            palette.button: Appearance.colors.colSurfaceContainerHighest
-                            palette.text: Appearance.colors.colOnSurface
-                            palette.buttonText: Appearance.colors.colOnSurface
                             Accessible.name: I18n.t("led.overheat")
+
+                            component StepIndicator: Item {
+                                id: step
+                                required property bool increase
+                                implicitWidth: 36
+                                implicitHeight: 40
+                                height: overheatThreshold.height
+                                x: increase !== overheatThreshold.mirrored ? overheatThreshold.width - width : 0
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: 4
+                                    radius: Appearance.rounding.unsharpen
+                                    color: Appearance.colors.colSurfaceContainerHigh
+                                    visible: step.increase ? overheatThreshold.up.pressed : overheatThreshold.down.pressed
+                                }
+                                MaterialSymbol {
+                                    anchors.centerIn: parent
+                                    text: step.increase ? "add" : "remove"
+                                    iconSize: 18
+                                    color: Appearance.colors.colOnSurface
+                                    opacity: (step.increase ? overheatThreshold.value < overheatThreshold.to
+                                                            : overheatThreshold.value > overheatThreshold.from) ? 1 : 0.42
+                                }
+                            }
+
+                            up.indicator: StepIndicator { increase: true }
+                            down.indicator: StepIndicator { increase: false }
+
+                            background: Rectangle {
+                                implicitWidth: 140
+                                implicitHeight: 40
+                                radius: Appearance.rounding.unsharpenmore
+                                color: Appearance.colors.colSurfaceContainerHighest
+                                border.color: overheatThreshold.activeFocus
+                                              ? Appearance.colors.colPrimary : Appearance.colors.colOutlineVariant
+                                border.width: overheatThreshold.activeFocus ? 2 : 1
+                            }
+
+                            contentItem: TextInput {
+                                id: thresholdEditor
+                                z: 2
+                                text: overheatThreshold.displayText
+                                font: overheatThreshold.font
+                                color: Appearance.colors.colOnSurface
+                                selectionColor: Appearance.colors.colPrimary
+                                selectedTextColor: Appearance.colors.colOnPrimary
+                                horizontalAlignment: TextInput.AlignHCenter
+                                verticalAlignment: TextInput.AlignVCenter
+                                validator: overheatThreshold.validator
+                                inputMethodHints: overheatThreshold.inputMethodHints
+                                readOnly: !overheatThreshold.editable
+                                selectByMouse: true
+
+                                Keys.onMenuPressed: thresholdMenu.popup()
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: {
+                                        thresholdEditor.forceActiveFocus()
+                                        thresholdMenu.popup(point.position)
+                                    }
+                                }
+                                StyledEditMenu {
+                                    id: thresholdMenu
+                                    editor: thresholdEditor
+                                }
+                            }
                         }
                         MaterialButton {
                             variant: MaterialButton.Variant.Tonal
