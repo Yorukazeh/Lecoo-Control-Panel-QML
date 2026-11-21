@@ -163,6 +163,9 @@ pub mod qobject {
         #[qproperty(QString, power_profile, cxx_name = "powerProfile")]
         #[qproperty(QString, controller_info, cxx_name = "controllerInfo")]
         #[qproperty(QString, battery_info, cxx_name = "batteryInfo")]
+        #[qproperty(QString, charge_status, cxx_name = "chargeStatus")]
+        #[qproperty(bool, custom_charge_supported, cxx_name = "customChargeSupported")]
+        #[qproperty(bool, charge_busy, cxx_name = "chargeBusy")]
         #[qproperty(QString, os_info, cxx_name = "osInfo")]
         #[qproperty(QString, os_version, cxx_name = "osVersion")]
         #[qproperty(QString, status_message, cxx_name = "statusMessage")]
@@ -208,6 +211,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "applyChargePreset"]
         fn apply_charge_preset(self: Pin<&mut Self>, preset: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "applyChargeRange"]
+        fn apply_charge_range(self: Pin<&mut Self>, min: i32, max: i32);
+
+        #[qinvokable]
+        #[cxx_name = "refreshCharge"]
+        fn refresh_charge(self: Pin<&mut Self>);
 
         #[qinvokable]
         #[cxx_name = "applyKeyboardLevel"]
@@ -286,6 +297,9 @@ pub struct ControlCenterRust {
     power_profile: QString,
     controller_info: QString,
     battery_info: QString,
+    charge_status: QString,
+    custom_charge_supported: bool,
+    charge_busy: bool,
     os_info: QString,
     os_version: QString,
     status_message: QString,
@@ -312,6 +326,9 @@ impl Default for ControlCenterRust {
             power_profile: QString::default(),
             controller_info: QString::default(),
             battery_info: QString::default(),
+            charge_status: QString::default(),
+            custom_charge_supported: false,
+            charge_busy: false,
             os_info: qobject::os_product_name(),
             os_version: qobject::os_kernel_version(),
             status_message: QString::default(),
@@ -532,6 +549,15 @@ fn battery_details(output: &str) -> &str {
     // The card already has a title; all upstream locales prefix the CLI heading with 🔋.
     let (first, rest) = output.split_once('\n').unwrap_or((output, ""));
     if first.trim_start().starts_with('🔋') { rest.trim_end() } else { output }
+}
+
+fn charge_range_args(min: i32, max: i32) -> Option<[String; 4]> {
+    (20 <= min && min < max && max <= 100)
+        .then(|| ["--min".into(), min.to_string(), "--max".into(), max.to_string()])
+}
+
+fn supports_charge_range(help: &str) -> bool {
+    help.lines().any(|line| line.trim_start().starts_with("--min <N> --max <N>"))
 }
 
 /// Return a compiled-in legal document by name.
@@ -1015,18 +1041,62 @@ impl qobject::ControlCenter {
         );
     }
 
-    pub fn apply_charge_preset(mut self: Pin<&mut Self>, preset: &QString) {
+    pub fn refresh_charge(mut self: Pin<&mut Self>) {
+        if self.charge_busy {
+            return;
+        }
+        self.as_mut().set_charge_busy(true);
+        self.run_async(
+            || (run_cli(&["charge", "--help"]), run_cli(&["charge"])),
+            |mut obj, (help, status)| {
+                obj.as_mut()
+                    .set_custom_charge_supported(help.is_ok_and(|help| supports_charge_range(&help)));
+                obj.as_mut().set_charge_status(qstring(battery_details(&status.unwrap_or_default())));
+                obj.set_charge_busy(false);
+            },
+        );
+    }
+
+    pub fn apply_charge_preset(self: Pin<&mut Self>, preset: &QString) {
         let preset = String::from(preset);
         if !matches!(preset.as_str(), "full" | "high" | "balanced" | "lifespan" | "desk" | "freeze") {
             self.fail("backend.error.unsupported_charge_mode");
             return;
         }
+        self.apply_charge([preset]);
+    }
+
+    pub fn apply_charge_range(mut self: Pin<&mut Self>, min: i32, max: i32) {
+        let Some(args) = charge_range_args(min, max).filter(|_| self.custom_charge_supported) else {
+            self.as_mut().set_error_message(qstring("charge.invalidRange"));
+            return;
+        };
+        self.apply_charge(args);
+    }
+
+    fn apply_charge<const N: usize>(mut self: Pin<&mut Self>, args: [String; N]) {
+        if self.charge_busy {
+            return;
+        }
+        self.as_mut().set_charge_busy(true);
         self.as_mut().begin();
         self.run_async(
-            move || run_cli(&["charge", &preset]),
-            |obj, result| match result {
-                Ok(_) => obj.finish("backend.status.charge_applied"),
-                Err(error) => obj.fail(error),
+            move || {
+                let args: Vec<_> = std::iter::once("charge").chain(args.iter().map(String::as_str)).collect();
+                run_cli(&args).map(|_| run_cli(&["charge"]).unwrap_or_default())
+            },
+            |mut obj, result| {
+                obj.as_mut().set_charge_busy(false);
+                match result {
+                    Ok(output) => {
+                        obj.as_mut().set_charge_status(qstring(battery_details(&output)));
+                        obj.finish("backend.status.charge_applied");
+                    }
+                    Err(error) => {
+                        obj.as_mut().set_error_message(qstring(error));
+                        obj.finish("backend.error.operation_failed");
+                    }
+                }
             },
         );
     }
@@ -1111,6 +1181,16 @@ impl qobject::ControlCenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn charge_range_requires_supported_bounds_and_order() {
+        assert_eq!(charge_range_args(20, 100).unwrap(), ["--min", "20", "--max", "100"]);
+        for (min, max) in [(19, 80), (70, 101), (80, 70), (80, 80)] {
+            assert!(charge_range_args(min, max).is_none());
+        }
+        assert!(supports_charge_range("  --min <N> --max <N>\n    自定义范围: 20% .. 100%"));
+        assert!(!supports_charge_range("Usage: lecoo-ctrl charge [<PRESET> | --min <N> --max <N>]"));
+    }
 
     #[test]
     fn led_arguments_match_upstream_cli() {

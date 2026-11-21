@@ -28,7 +28,6 @@ ApplicationWindow {
         property string schemeVariantStored: "tonalSpot"
         property string languageStored: ""
         property string profileStored: "default"
-        property string chargeStored: "balanced"
         property string kbdModeStored: "medium"
         property int kbdPwmStored: 160
         property int ledBrightnessStored: 128
@@ -121,7 +120,6 @@ ApplicationWindow {
 
     property bool followSystemTheme: settings.followSystemStored
     property string selectedProfile: settings.profileStored
-    property string selectedCharge: settings.chargeStored
     property string kbdMode: settings.kbdModeStored
     property int kbdPwm: settings.kbdPwmStored
     property int ledBrightness: settings.ledBrightnessStored
@@ -514,7 +512,6 @@ ApplicationWindow {
     }
 
     onSelectedProfileChanged: settings.profileStored = selectedProfile
-    onSelectedChargeChanged: settings.chargeStored = selectedCharge
     onKbdModeChanged: settings.kbdModeStored = kbdMode
     onKbdPwmChanged: settings.kbdPwmStored = kbdPwm
     onLedBrightnessChanged: settings.ledBrightnessStored = ledBrightness
@@ -1090,6 +1087,10 @@ ApplicationWindow {
             PageScroll {
                 id: controlsPage
                 active: StackLayout.isCurrentItem
+                onActiveChanged: {
+                    if (active)
+                        backend.refreshCharge()
+                }
 
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -1151,12 +1152,56 @@ ApplicationWindow {
                                     required property var modelData
                                     buttonText: modelData.label
                                     leadingIcon: modelData.icon
-                                    toggled: appWindow.selectedCharge === modelData.key
-                                    onClicked: {
-                                        appWindow.selectedCharge = modelData.key
-                                        backend.applyChargePreset(modelData.key)
-                                    }
+                                    enabled: !backend.busy && !backend.chargeBusy
+                                    onClicked: backend.applyChargePreset(modelData.key)
                                 }
+                            }
+                        }
+
+                        Divider { }
+
+                        SettingsRow {
+                            title: I18n.t("charge.custom")
+                            subtitle: I18n.t(backend.customChargeSupported ? "charge.bounds" : "charge.unavailable")
+
+                            MaterialButton {
+                                buttonText: I18n.t("action.apply")
+                                buttonIcon: "check"
+                                variant: MaterialButton.Variant.Filled
+                                buttonColor: down ? Appearance.colors.colPrimaryActive
+                                            : hovered ? Appearance.colors.colPrimaryHover
+                                            : Appearance.colors.colPrimary
+                                enabled: backend.customChargeSupported && !backend.busy && !backend.chargeBusy
+                                         && chargeMin.value < chargeMax.value
+                                onClicked: backend.applyChargeRange(chargeMin.value, chargeMax.value)
+                            }
+                        }
+
+                        ColumnLayout {
+                            visible: backend.customChargeSupported
+                            Layout.fillWidth: true
+
+                            StyledText { text: I18n.t("charge.min", chargeMin.value) }
+                            StyledSlider {
+                                id: chargeMin
+                                Layout.fillWidth: true
+                                from: 20
+                                to: 100
+                                stepSize: 1
+                                value: 70
+                                tooltipContent: value + "%"
+                                Accessible.name: I18n.t("charge.min", value)
+                            }
+                            StyledText { text: I18n.t("charge.max", chargeMax.value) }
+                            StyledSlider {
+                                id: chargeMax
+                                Layout.fillWidth: true
+                                from: 20
+                                to: 100
+                                stepSize: 1
+                                value: 80
+                                tooltipContent: value + "%"
+                                Accessible.name: I18n.t("charge.max", value)
                             }
                         }
 
@@ -1171,7 +1216,9 @@ ApplicationWindow {
                             }
                             StyledText {
                                 Layout.fillWidth: true
-                                text: I18n.t("charge.current", I18n.t("charge." + appWindow.selectedCharge))
+                                text: backend.chargeStatus.length > 0 ? backend.chargeStatus : I18n.t("charge.noStatus")
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
                                 color: Appearance.colors.colOnSurfaceVariant
                                 font.pixelSize: 12
                             }
