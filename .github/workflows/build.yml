@@ -68,6 +68,18 @@ jobs:
         shell: pwsh
         run: ./scripts/package-windows.ps1 -QtBin "$env:QT_ROOT_DIR\bin" -NoBuild
 
+      - name: Create Windows ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $env:RUNNER_TEMP "Lecoo-Control-Panel-QML"
+          $appDir = Join-Path $packageRoot "Lecoo-Control-Panel-QML"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "target/release/Lecoo-Control-Panel-QML-windows-x64-qt${{ matrix.qt }}.zip"
+          New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+          Copy-Item -Path "target/release/*" -Destination $appDir -Recurse -Force
+          Copy-Item "scripts/Lecoo-Ctrl-Manager.bat" $packageRoot
+          Compress-Archive -Path "$packageRoot/*" -DestinationPath $zip -CompressionLevel Optimal
+
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -81,5 +93,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Lecoo-Control-Panel-QML-windows-x64-qt${{ matrix.qt }}
-          path: target/release/
+          path: target/release/Lecoo-Control-Panel-QML-windows-x64-qt${{ matrix.qt }}.zip
           if-no-files-found: error
