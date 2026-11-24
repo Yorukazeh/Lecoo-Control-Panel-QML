@@ -31,7 +31,7 @@ fn main() {
         app_ref.as_mut().set_application_name(&QString::from("io.lecooctrl.gui"));
         app_ref.as_mut().set_organization_name(&QString::from("lecooctrl"));
         app_ref.as_mut().set_organization_domain(&QString::from("lecooctrl.gui"));
-        app_ref.as_mut().set_application_version(&QString::from("0.5.2"));
+        app_ref.as_mut().set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
         // Use the Basic Qt Quick Controls style.
         backend::qobject::set_quick_controls_style(&QString::from("Basic"));
 

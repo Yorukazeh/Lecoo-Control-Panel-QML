@@ -1301,7 +1301,8 @@ mod tests {
 
     #[test]
     fn version_banner_keeps_only_the_version() {
-        assert_eq!(version_from_banner("lecoo-ctrl v0.5.2-beta"), "0.5.2-beta");
+        assert_eq!(version_from_banner("lecoo-ctrl v0.6.0"), "0.6.0");
+        assert_eq!(version_from_banner("lecoo-ctrl v0.6.0-beta"), "0.6.0-beta");
         assert_eq!(version_from_banner("lecoo-ctrl 1.2.3"), "1.2.3");
         assert_eq!(version_from_banner("lecoo-ctrl v2"), "2");
         assert_eq!(version_from_banner(""), "");
