@@ -31,7 +31,7 @@ Lecoo Control Center GUI是基于Lecoo Control Center打造的非官方图形界
 
 ## 支持范围
 
-- Linux: Ubuntu 24.04+, Debian 13+, Arch Linux (GLIBC ≥ 2.39)
+- Linux: Ubuntu 22.04+, Debian 12+, Arch Linux (GLIBC ≥ 2.35)
 - Windows: Windows 10 20H1+, Windows 11
 
 ## 运行要求

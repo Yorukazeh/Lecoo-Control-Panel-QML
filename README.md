@@ -30,7 +30,7 @@ The GUI is an independent client. Hardware access is provided by the external [`
 
 ## Supported platforms
 
-- Linux: Ubuntu 24.04+, Debian 13+, Arch Linux (GLIBC ≥ 2.39)
+- Linux: Ubuntu 22.04+, Debian 12+, Arch Linux (GLIBC ≥ 2.35)
 - Windows: Windows 10 20H1+, Windows 11
 
 ## Requirements
