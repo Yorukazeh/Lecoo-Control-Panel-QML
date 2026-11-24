@@ -7,6 +7,7 @@ fn configure_windows_icon() {
     resource.set("ProductName", "Lecoo Control Panel QML");
     resource.set("FileDescription", "Lecoo Control Panel QML");
     resource.compile().expect("failed to embed the Windows application icon");
+    println!("cargo:rustc-link-lib=user32");
 }
 
 #[cfg(not(windows))]
@@ -103,6 +104,7 @@ fn main() {
         .cpp_file("src/qt_shim.cpp")
         .qt_module("Quick")
         .qt_module("QuickControls2")
+        .qt_module("Network")
         // QSystemTrayIcon and QMenu belong to QtWidgets on Linux and Windows.
         .qt_module("Widgets");
 

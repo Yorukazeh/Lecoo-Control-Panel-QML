@@ -8,8 +8,6 @@ use cxx_qt::casting::Upcast;
 use cxx_qt_lib::{QQmlApplicationEngine, QQmlEngine, QString, QUrl};
 
 fn main() {
-    cxx_qt::init_qml_module!("io.lecooctrl.gui");
-
     // Use Qt's threaded render loop on Wayland.
     #[cfg(target_os = "linux")]
     if std::env::var_os("QSG_RENDER_LOOP").is_none() {
@@ -42,6 +40,16 @@ fn main() {
         backend::qobject::set_desktop_file_name(&app_id);
     }
 
+    match backend::qobject::start_single_instance() {
+        0 => {}
+        1 => return,
+        _ => {
+            eprintln!("GUI: could not start or contact the existing instance");
+            std::process::exit(1);
+        }
+    }
+
+    cxx_qt::init_qml_module!("io.lecooctrl.gui");
     let mut engine = QQmlApplicationEngine::new();
 
     if let Some(mut engine_ref) = engine.as_mut() {

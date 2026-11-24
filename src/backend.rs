@@ -142,6 +142,8 @@ pub mod qobject {
         fn lecooOsVersion() -> QString;
         #[rust_name = "new_application"]
         fn lecooNewApplication(args: &QStringList) -> UniquePtr<QGuiApplication>;
+        #[rust_name = "start_single_instance"]
+        fn lecooStartSingleInstance() -> i32;
         #[rust_name = "tray_available"]
         fn lecooTrayAvailable() -> bool;
         #[rust_name = "tray_init"]

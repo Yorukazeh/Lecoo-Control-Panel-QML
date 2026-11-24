@@ -33,6 +33,8 @@ QString lecooOsVersion();
 
 // QApplication is required by the native tray menu, even with Qt Quick windows.
 std::unique_ptr<QGuiApplication> lecooNewApplication(const QStringList &args);
+// 0: primary, 1: activated the primary, 2: startup failed.
+int lecooStartSingleInstance();
 bool lecooTrayAvailable();
 void lecooInitTray(QObject &controller);
 // Five labels: Show, Silent, Balanced, Performance, Quit. Action IDs stay 0..4.

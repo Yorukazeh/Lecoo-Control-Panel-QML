@@ -5,17 +5,30 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QCursor>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFont>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QLockFile>
 #include <QMenu>
 #include <QPointer>
 #include <QQuickStyle>
 #include <QScreen>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QSysInfo>
+#include <QThread>
+#include <QTimer>
 #include <QWidget>
+
+#ifdef Q_OS_WIN
+#include <QCryptographicHash>
+#include <qt_windows.h>
+#endif
 
 #include <vector>
 
@@ -110,6 +123,43 @@ std::unique_ptr<QGuiApplication> lecooNewApplication(const QStringList &args)
 }
 
 namespace {
+QPointer<QObject> activationTarget;
+
+struct SingleInstance : QObject
+{
+    explicit SingleInstance(const QString &path) : lock(path) { lock.setStaleLockTime(0); }
+
+    QLockFile lock;
+    QLocalServer server;
+};
+
+constexpr int maxActivationMessage = 4096;
+
+void receiveActivation(QLocalSocket *socket)
+{
+    socket->setReadBufferSize(maxActivationMessage);
+    QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+    QTimer::singleShot(3000, socket, &QObject::deleteLater);
+    const auto receive = [socket] {
+        if (!socket->canReadLine()) {
+            if (socket->bytesAvailable() >= maxActivationMessage)
+                socket->abort();
+            return;
+        }
+        auto token = socket->readLine();
+        token.chop(1);
+        if (activationTarget) {
+            // Qt Wayland consumes this token when the existing window requests activation.
+            if (!token.isEmpty() && QGuiApplication::platformName().startsWith(QStringLiteral("wayland")))
+                qputenv("XDG_ACTIVATION_TOKEN", token);
+            QMetaObject::invokeMethod(activationTarget.data(), "handleTrayAction", Q_ARG(int, 0));
+        }
+        socket->disconnectFromServer();
+    };
+    QObject::connect(socket, &QLocalSocket::readyRead, socket, receive);
+    receive();
+}
+
 // No custom meta-object or Rust callback ownership: Qt owns all tray objects.
 class LecooTray : public QObject
 {
@@ -149,6 +199,70 @@ public:
 QPointer<LecooTray> tray;
 }
 
+int lecooStartSingleInstance()
+{
+#ifdef Q_OS_WIN
+    const auto directory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+#else
+    const auto directory = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+#endif
+    if (directory.isEmpty() || !QDir().mkpath(directory))
+        return 2;
+    const auto path = QDir(directory).filePath(QCoreApplication::applicationName() + QStringLiteral(".lock"));
+#ifdef Q_OS_WIN
+    const auto name = QStringLiteral("lecoo-")
+        + QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha256).toHex().left(32));
+#else
+    const auto name = QDir(directory).filePath(QCoreApplication::applicationName());
+#endif
+    auto instance = std::make_unique<SingleInstance>(path);
+    QElapsedTimer startup;
+    startup.start();
+    do {
+        if (instance->lock.tryLock(0)) {
+            // Only the lock owner may clean up a socket left by a crashed process.
+            QLocalServer::removeServer(name);
+            instance->server.setSocketOptions(QLocalServer::UserAccessOption);
+            if (!instance->server.listen(name))
+                return 2;
+            auto *server = &instance->server;
+            QObject::connect(server, &QLocalServer::newConnection, server, [server] {
+                while (auto *socket = server->nextPendingConnection())
+                    receiveActivation(socket);
+            });
+            instance->setParent(qApp);
+            instance.release();
+            return 0;
+        }
+        if (instance->lock.error() != QLockFile::LockFailedError)
+            return 2;
+
+        QLocalSocket socket;
+        socket.connectToServer(name, QIODevice::WriteOnly);
+        if (socket.waitForConnected(100)) {
+#ifdef Q_OS_WIN
+            qint64 pid;
+            QString host, app;
+            if (instance->lock.getLockInfo(&pid, &host, &app))
+                AllowSetForegroundWindow(static_cast<DWORD>(pid));
+#endif
+            auto token = qgetenv("XDG_ACTIVATION_TOKEN");
+            if (token.size() >= maxActivationMessage || token.contains('\n') || token.contains('\0'))
+                token.clear();
+            token.append('\n');
+            if (socket.write(token) != token.size())
+                return 2;
+            while (socket.bytesToWrite() > 0) {
+                if (!socket.waitForBytesWritten(1000))
+                    return 2;
+            }
+            return 1;
+        }
+        QThread::msleep(50);
+    } while (startup.elapsed() < 3000);
+    return 2;
+}
+
 bool lecooTrayAvailable()
 {
     return QSystemTrayIcon::isSystemTrayAvailable();
@@ -156,6 +270,7 @@ bool lecooTrayAvailable()
 
 void lecooInitTray(QObject &controller)
 {
+    activationTarget = &controller;
     if (!tray)
         tray = new LecooTray(controller);
 }
