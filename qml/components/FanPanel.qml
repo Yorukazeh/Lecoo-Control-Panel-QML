@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import io.lecooctrl.gui
 
-/** Fan controls with automatic, full-speed, and custom PWM modes. */
+/** Fan mode and manual PWM controls. */
 Card {
     id: panel
 
@@ -18,13 +18,14 @@ Card {
     readonly property var modes: [
         { key: "auto", label: I18n.t("fan.auto"), icon: "auto_mode" },
         { key: "full", label: I18n.t("fan.full"), icon: "rocket_launch" },
+        { key: "turbo", label: I18n.t("fan.turbo"), icon: "speed" },
         { key: "custom", label: I18n.t("fan.custom"), icon: "tune" }
     ]
 
     Layout.fillWidth: true
     Layout.fillHeight: true
     Layout.minimumWidth: 320
-    implicitHeight: 250
+    Layout.minimumHeight: 250
     title: panel.target === "cpu" ? I18n.t("fan.cpu") : I18n.t("fan.gpu")
     leadingIcon: panel.target === "cpu" ? "cyclone" : "air"
     subtitle: I18n.t("fan.subtitle")
@@ -40,8 +41,9 @@ Card {
                 required property var modelData
                 required property int index
                 // Keep segment widths equal for consistent alignment.
-                width: (parent.width - 2 * parent.spacing) / panel.modes.length
+                width: (parent.width - (panel.modes.length - 1) * parent.spacing) / panel.modes.length
                 height: 44
+                horizontalPadding: 6
                 leftmost: index === 0
                 rightmost: index === panel.modes.length - 1
                 showCheckWhenSelected: false
@@ -55,6 +57,14 @@ Card {
                 }
             }
         }
+    }
+
+    StyledText {
+        Layout.fillWidth: true
+        text: I18n.t("fan.turboWarning")
+        color: Appearance.colors.colOnSurfaceVariant
+        font.pixelSize: 12
+        wrapMode: Text.Wrap
     }
 
     RowLayout {

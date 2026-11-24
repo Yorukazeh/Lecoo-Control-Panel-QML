@@ -1009,7 +1009,7 @@ impl qobject::ControlCenter {
         let target = String::from(target);
         let mode = String::from(mode);
         if !matches!(target.as_str(), "cpu" | "gpu" | "both")
-            || !matches!(mode.as_str(), "auto" | "full" | "custom")
+            || !matches!(mode.as_str(), "auto" | "full" | "turbo" | "custom")
         {
             self.fail("backend.error.unsupported_fan_mode");
             return;

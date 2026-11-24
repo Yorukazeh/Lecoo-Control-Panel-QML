@@ -59,9 +59,11 @@ var strings = {
 
         "fan.cpu": "CPU Fan",
         "fan.gpu": "GPU Fan",
-        "fan.subtitle": "Auto curve / full speed / custom PWM",
+        "fan.subtitle": "Auto curve / full speed / turbo / custom PWM",
         "fan.auto": "Auto",
         "fan.full": "Full speed",
+        "fan.turbo": "Turbo",
+        "fan.turboWarning": "Turbo uses the highest fan speed. Prolonged use accelerates fan wear.",
         "fan.custom": "Custom",
         "fan.curve.titleCpu": "CPU Fan Curve",
         "fan.curve.titleGpu": "GPU Fan Curve",

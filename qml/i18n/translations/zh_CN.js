@@ -59,9 +59,11 @@ var strings = {
 
         "fan.cpu": "CPU 风扇",
         "fan.gpu": "GPU 风扇",
-        "fan.subtitle": "自动曲线 / 全速 / 自定义 PWM",
+        "fan.subtitle": "自动曲线 / 全速 / 涡轮 / 自定义 PWM",
         "fan.auto": "自动",
         "fan.full": "全速",
+        "fan.turbo": "涡轮",
+        "fan.turboWarning": "涡轮模式使用最高转速，长时间使用会加速风扇磨损。",
         "fan.custom": "自定义",
         "fan.curve.titleCpu": "CPU 风扇调速曲线",
         "fan.curve.titleGpu": "GPU 风扇调速曲线",
