@@ -164,6 +164,7 @@ pub mod qobject {
         #[qproperty(QString, controller_info, cxx_name = "controllerInfo")]
         #[qproperty(QString, battery_info, cxx_name = "batteryInfo")]
         #[qproperty(QString, charge_status, cxx_name = "chargeStatus")]
+        #[qproperty(QStringList, charge_presets, cxx_name = "chargePresets")]
         #[qproperty(bool, custom_charge_supported, cxx_name = "customChargeSupported")]
         #[qproperty(bool, charge_busy, cxx_name = "chargeBusy")]
         #[qproperty(QString, os_info, cxx_name = "osInfo")]
@@ -298,6 +299,7 @@ pub struct ControlCenterRust {
     controller_info: QString,
     battery_info: QString,
     charge_status: QString,
+    charge_presets: cxx_qt_lib::QStringList,
     custom_charge_supported: bool,
     charge_busy: bool,
     os_info: QString,
@@ -327,6 +329,7 @@ impl Default for ControlCenterRust {
             controller_info: QString::default(),
             battery_info: QString::default(),
             charge_status: QString::default(),
+            charge_presets: cxx_qt_lib::QStringList::default(),
             custom_charge_supported: false,
             charge_busy: false,
             os_info: qobject::os_product_name(),
@@ -558,6 +561,42 @@ fn charge_range_args(min: i32, max: i32) -> Option<[String; 4]> {
 
 fn supports_charge_range(help: &str) -> bool {
     help.lines().any(|line| line.trim_start().starts_with("--min <N> --max <N>"))
+}
+
+fn charge_presets(help: &str) -> cxx_qt_lib::QStringList {
+    const SUPPORTED: &[&str] = &["full", "desk", "lifespan", "balanced", "high", "hold"];
+    let mut presets = Vec::new();
+    let mut in_presets = false;
+    for line in help.lines() {
+        let line = line.trim();
+        if line.contains("<PRESET>") {
+            in_presets = true;
+            continue;
+        }
+        if !in_presets {
+            continue;
+        }
+        let Some(name) = line.strip_prefix("- ").and_then(|line| line.split_whitespace().next()) else {
+            continue;
+        };
+        if SUPPORTED.contains(&name) {
+            presets.push(name.to_owned());
+        }
+    }
+    presets.sort_by_key(|preset| match preset.as_str() {
+        "full" => 0,
+        "high" => 1,
+        "balanced" => 2,
+        "lifespan" => 3,
+        "desk" => 4,
+        "hold" => 5,
+        _ => unreachable!(),
+    });
+    let mut result = cxx_qt_lib::QStringList::default();
+    for preset in presets {
+        result.append(qstring(preset));
+    }
+    result
 }
 
 /// Return a compiled-in legal document by name.
@@ -1049,8 +1088,9 @@ impl qobject::ControlCenter {
         self.run_async(
             || (run_cli(&["charge", "--help"]), run_cli(&["charge"])),
             |mut obj, (help, status)| {
-                obj.as_mut()
-                    .set_custom_charge_supported(help.is_ok_and(|help| supports_charge_range(&help)));
+                let help = help.unwrap_or_default();
+                obj.as_mut().set_charge_presets(charge_presets(&help));
+                obj.as_mut().set_custom_charge_supported(supports_charge_range(&help));
                 obj.as_mut().set_charge_status(qstring(battery_details(&status.unwrap_or_default())));
                 obj.set_charge_busy(false);
             },
@@ -1059,7 +1099,8 @@ impl qobject::ControlCenter {
 
     pub fn apply_charge_preset(self: Pin<&mut Self>, preset: &QString) {
         let preset = String::from(preset);
-        if !matches!(preset.as_str(), "full" | "high" | "balanced" | "lifespan" | "desk" | "freeze") {
+        if !matches!(preset.as_str(), "full" | "high" | "balanced" | "lifespan" | "desk" | "hold" | "freeze")
+        {
             self.fail("backend.error.unsupported_charge_mode");
             return;
         }
@@ -1190,6 +1231,21 @@ mod tests {
         }
         assert!(supports_charge_range("  --min <N> --max <N>\n    自定义范围: 20% .. 100%"));
         assert!(!supports_charge_range("Usage: lecoo-ctrl charge [<PRESET> | --min <N> --max <N>]"));
+    }
+
+    #[test]
+    fn charge_presets_follow_board_specific_help() {
+        let n155 = charge_presets(
+            "Usage: charge [<PRESET> | --min <N> --max <N>]\n\n<PRESET>\n  - full Full\n  - desk Desk\n  - balanced Balanced\n",
+        );
+        let n155: Vec<_> = n155.iter().map(|value| value.to_string()).collect();
+        assert_eq!(n155, ["full", "balanced", "desk"]);
+
+        let n161 = charge_presets(
+            "Usage: charge [<PRESET>]\n\n<PRESET>\n  - full Full\n  - lifespan Lifespan\n  - hold Hold\n",
+        );
+        let n161: Vec<_> = n161.iter().map(|value| value.to_string()).collect();
+        assert_eq!(n161, ["full", "lifespan", "hold"]);
     }
 
     #[test]

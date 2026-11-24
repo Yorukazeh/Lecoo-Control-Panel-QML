@@ -137,6 +137,18 @@ ApplicationWindow {
         railPreference = railExpanded ? -1 : 1
     }
 
+    function chargePresetIcon(key) {
+        switch (key) {
+        case "full": return "battery_full"
+        case "high": return "battery_5_bar"
+        case "balanced": return "balance"
+        case "lifespan": return "eco"
+        case "desk": return "power"
+        case "hold": return "pause_circle"
+        default: return "battery_charging_full"
+        }
+    }
+
     function storedFanCurve(text) {
         var values = String(text).split(",")
         if (values.length !== 6)
@@ -1141,19 +1153,13 @@ ApplicationWindow {
                             spacing: 8
 
                             Repeater {
-                                model: [
-                                    { key: "full", label: I18n.t("charge.full"), icon: "battery_full" },
-                                    { key: "high", label: I18n.t("charge.high"), icon: "battery_5_bar" },
-                                    { key: "balanced", label: I18n.t("charge.balanced"), icon: "balance" },
-                                    { key: "lifespan", label: I18n.t("charge.lifespan"), icon: "eco" },
-                                    { key: "desk", label: I18n.t("charge.desk"), icon: "power" }
-                                ]
+                                model: backend.chargePresets
                                 delegate: Chip {
-                                    required property var modelData
-                                    buttonText: modelData.label
-                                    leadingIcon: modelData.icon
+                                    required property string modelData
+                                    buttonText: I18n.t("charge." + modelData)
+                                    leadingIcon: appWindow.chargePresetIcon(modelData)
                                     enabled: !backend.busy && !backend.chargeBusy
-                                    onClicked: backend.applyChargePreset(modelData.key)
+                                    onClicked: backend.applyChargePreset(modelData)
                                 }
                             }
                         }

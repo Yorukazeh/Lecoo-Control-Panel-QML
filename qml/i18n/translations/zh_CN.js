@@ -92,6 +92,7 @@ var strings = {
         "charge.balanced": "平衡模式 80%",
         "charge.lifespan": "寿命模式 60%",
         "charge.desk": "桌面模式 40%",
+        "charge.hold": "保持当前电量",
         "charge.custom": "自定义充电范围",
         "charge.bounds": "范围 20%～100%",
         "charge.unavailable": "自定义范围不可用",

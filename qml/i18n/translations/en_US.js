@@ -92,6 +92,7 @@ var strings = {
         "charge.balanced": "Balanced 80%",
         "charge.lifespan": "lifespan 60%",
         "charge.desk": "Desk 40%",
+        "charge.hold": "Hold current charge",
         "charge.custom": "Custom charge range",
         "charge.bounds": "Scope 20%–100%",
         "charge.unavailable": "Custom range unavailable",
