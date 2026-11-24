@@ -148,7 +148,7 @@ var strings = {
 
         "about.title": "关于程序",
         "about.subtitle": "版本与后端组件信息。",
-        "about.appName": "Lecoo Control Center GUI",
+        "about.appName": "Lecoo Control Panel QML",
         "about.appCopyright": "© 2026 Yorukazeh · 基于 Qt 6 / QML 的 Material 3 界面",
         "about.sourceTitle": "源代码",
         "about.sourceSubtitle": "在远程仓库中查看项目源代码",

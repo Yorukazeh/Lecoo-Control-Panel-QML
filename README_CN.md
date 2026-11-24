@@ -1,12 +1,12 @@
 <div align="center">
 
-# Lecoo Control Center GUI
+# Lecoo Control Panel QML
 
 EN [English Readme here](README.md)
 
 </div>
 
-Lecoo Control Center GUI是基于Lecoo Control Center打造的非官方图形界面版控制中心，使用 Qt 6、Rust 和 QML 构建，专为基于Emdoor底盘的笔记本电脑（如Lecoo Pro 14 / Lecoo N155）设计。
+Lecoo Control Panel QML 是基于 Lecoo Control Center 打造的非官方图形界面版控制中心，使用 Qt 6、Rust 和 QML 构建，专为基于 Emdoor 底盘的笔记本电脑（如 Lecoo Pro 14 / Lecoo N155）设计。
 
 本程序是独立的 GUI 客户端。硬件访问由外部 [`lecoo-ctrl`](https://github.com/LaVashikk/Lecoo-Control-Center) 命令行程序及其 `lecoo-ec-daemon` 后端负责。GUI 通过子进程调用后端，不直接访问 EC 或 `/dev`。
 
@@ -58,13 +58,13 @@ cargo build --release
 Linux 构建产物：
 
 ```text
-target/release/Lecoo-Control-Center-GUI
+target/release/Lecoo-Control-Panel-QML
 ```
 
 Windows 构建产物：
 
 ```text
-target\release\Lecoo-Control-Center-GUI.exe
+target\release\Lecoo-Control-Panel-QML.exe
 ```
 
 ## 配置后端 CLI
@@ -75,14 +75,14 @@ Linux：
 
 ```bash
 export LECOO_CTRL=/path/to/lecoo-ctrl
-./target/release/Lecoo-Control-Center-GUI
+./target/release/Lecoo-Control-Panel-QML
 ```
 
 Windows PowerShell：
 
 ```powershell
 $env:LECOO_CTRL = "C:\path\to\lecoo-ctrl.exe"
-.\target\release\Lecoo-Control-Center-GUI.exe
+.\target\release\Lecoo-Control-Panel-QML.exe
 ```
 
 如果不设置 `LECOO_CTRL`，将 `lecoo-ctrl` 安装到系统 `PATH` 即可。

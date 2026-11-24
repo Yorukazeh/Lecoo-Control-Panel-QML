@@ -1,14 +1,14 @@
 <div align="center">
 
-# Lecoo Control Center GUI
+# Lecoo Control Panel QML
 
 CN [中文 Readme 在这](README_CN.md)
 
 </div>
 
-Lecoo Control Center GUI is an unofficial graphical interface version of the Lecoo Control Center, built using Qt 6, Rust, and QML, and designed specifically for laptops based on the Emdoor chassis (such as Lecoo Pro 14 and Lecoo N155).
+Lecoo Control Panel QML is an unofficial graphical interface for Lecoo Control Center, built using Qt 6, Rust, and QML, and designed for laptops based on Emdoor chassis (such as Lecoo Pro 14 and Lecoo N155).
 
-The GUI is an independent client. Hardware access is provided by the external [`lecoo-ctrl`](https://github.com/LaVashikk/Lecoo-Control-Center) CLI and its `lecoo-ec-daemon` backend. The GUI invokes the CLI as a subprocess and does not access the EC or `/dev` directly.
+Lecoo Control Panel QML is an independent client. Hardware access is provided by the external [`lecoo-ctrl`](https://github.com/LaVashikk/Lecoo-Control-Center) CLI and its `lecoo-ec-daemon` backend. The GUI invokes the CLI as a subprocess and does not access the EC or `/dev` directly.
 
 ## Features
 
@@ -64,14 +64,14 @@ Linux:
 
 ```bash
 export LECOO_CTRL=/path/to/lecoo-ctrl
-./target/release/Lecoo-Control-Center-GUI
+./target/release/Lecoo-Control-Panel-QML
 ```
 
 Windows PowerShell:
 
 ```powershell
 $env:LECOO_CTRL = "C:\path\to\lecoo-ctrl.exe"
-.\target\release\Lecoo-Control-Center-GUI.exe
+.\target\release\Lecoo-Control-Panel-QML.exe
 ```
 
 Live monitoring starts one `lecoo-ctrl monitoring` process and reads its output.

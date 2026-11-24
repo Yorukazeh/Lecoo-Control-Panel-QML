@@ -4,8 +4,8 @@ use cxx_qt_build::{CxxQtBuilder, QResource, QResources, QmlFile, QmlModule};
 fn configure_windows_icon() {
     let mut resource = winres::WindowsResource::new();
     resource.set_icon("assets/app-icon.ico");
-    resource.set("ProductName", "Lecoo Control Center");
-    resource.set("FileDescription", "Lecoo Control Center");
+    resource.set("ProductName", "Lecoo Control Panel QML");
+    resource.set("FileDescription", "Lecoo Control Panel QML");
     resource.compile().expect("failed to embed the Windows application icon");
 }
 

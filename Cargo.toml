@@ -1,17 +1,17 @@
 [package]
-name = "Lecoo-Control-Center-GUI"
+name = "Lecoo-Control-Panel-QML"
 version = "0.3.0"
 edition = "2024"
 authors = ["Yorukazeh"]
 description = "Material 3 QML control center for Lecoo/Emdoor laptops (IT5570/IT5571 EC). Talks to the lecoo-ctrl CLI."
-repository = "https://github.com/Yorukazeh/Lecoo-Control-Center-GUI"
+repository = "https://github.com/Yorukazeh/Lecoo-Control-Panel-QML"
 license = "GPL-3.0-only"
 readme = "README.md"
 keywords = ["lecoo", "emdoor", "ec", "qt", "qml", "material3"]
 categories = ["gui", "hardware-support"]
 
 [[bin]]
-name = "Lecoo-Control-Center-GUI"
+name = "Lecoo-Control-Panel-QML"
 path = "src/main.rs"
 
 [dependencies]

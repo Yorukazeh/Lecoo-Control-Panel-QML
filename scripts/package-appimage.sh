@@ -4,9 +4,9 @@
 
 set -euo pipefail
 
-APP_ID="io.lecooctrl.gui"
-APP_NAME="Lecoo Control Center"
-BIN_NAME="Lecoo-Control-Center-GUI"
+APP_ID="io.lecooctrl.qml"
+APP_NAME="Lecoo Control Panel QML"
+BIN_NAME="Lecoo-Control-Panel-QML"
 
 LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
 LINUXDEPLOY_QT_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
@@ -36,7 +36,7 @@ cd "$repo"
 
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/lecoo-appimage-tools"
 appdir="$repo/target/appimage/AppDir"
-output="${output:-$repo/target/release/Lecoo_Control_Center-x86_64.AppImage}"
+output="${output:-$repo/target/release/Lecoo-Control-Panel-QML-x86_64.AppImage}"
 
 log() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -100,7 +100,7 @@ log "assembling AppDir at $appdir"
 rm -rf "$appdir"
 install -Dm755 "$exe" "$appdir/usr/bin/$BIN_NAME"
 
-install -Dm644 "$repo/assets/io.lecooctrl.gui.desktop" \
+install -Dm644 "$repo/assets/$APP_ID.desktop" \
     "$appdir/usr/share/applications/$APP_ID.desktop"
 
 # Generate the icon sizes required by the hicolor hierarchy.

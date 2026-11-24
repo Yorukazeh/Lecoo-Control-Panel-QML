@@ -148,7 +148,7 @@ var strings = {
 
         "about.title": "About",
         "about.subtitle": "Version and back-end component details.",
-        "about.appName": "Lecoo Control Center GUI",
+        "about.appName": "Lecoo Control Panel QML",
         "about.appCopyright": "© 2026 Yorukazeh · Material 3 interface built with Qt 6 / QML",
         "about.sourceTitle": "Source code",
         "about.sourceSubtitle": "View the project source in its remote repository",

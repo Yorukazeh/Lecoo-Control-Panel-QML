@@ -117,7 +117,7 @@ public:
     explicit LecooTray(QObject &controller) : QObject(&controller), menu(new QMenu),
         icon(new QSystemTrayIcon(QIcon(QStringLiteral(":/assets/app-icon.png")), this))
     {
-        icon->setToolTip(QStringLiteral("Lecoo Control Center"));
+        icon->setToolTip(QStringLiteral("Lecoo Control Panel QML"));
         icon->setContextMenu(menu.get());
         auto *group = new QActionGroup(this);
         group->setExclusive(true);

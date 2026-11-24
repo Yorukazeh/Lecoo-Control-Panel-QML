@@ -61,7 +61,7 @@ jobs:
           QT_VERSION: ${{ matrix.qt }}
         run: |
           ./scripts/package-appimage.sh --no-build \
-            --output "target/release/Lecoo-Control-Center-GUI-${QT_VERSION}-x86_64.AppImage"
+            --output "target/release/Lecoo-Control-Panel-QML-${QT_VERSION}-x86_64.AppImage"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -72,14 +72,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: Lecoo-Control-Center-GUI-linux-x86_64-qt${{ matrix.qt }}
-          path: target/release/Lecoo-Control-Center-GUI-*.AppImage
+          name: Lecoo-Control-Panel-QML-linux-x86_64-qt${{ matrix.qt }}
+          path: target/release/Lecoo-Control-Panel-QML-*.AppImage
           if-no-files-found: error
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: Lecoo-Control-Center-GUI-windows-x64-qt${{ matrix.qt }}
+          name: Lecoo-Control-Panel-QML-windows-x64-qt${{ matrix.qt }}
           path: target/release/
           if-no-files-found: error

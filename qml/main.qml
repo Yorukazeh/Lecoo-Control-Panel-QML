@@ -7,13 +7,13 @@ import QtCore
 import io.lecooctrl.gui 1.0
 
 
-// LECOO Control Center.
+// LECOO Control Panel.
 ApplicationWindow {
     id: appWindow
     visible: false
     width: 1280
     height: 800
-    title: "Lecoo Control Center"
+    title: "Lecoo Control Panel"
     color: Appearance.colors.colLayer0
 
     Settings {
@@ -763,7 +763,7 @@ ApplicationWindow {
                             elide: Text.ElideRight
                         }
                         StyledText {
-                            text: "Control Center"
+                            text: "Control Panel"
                             color: Appearance.colors.colSubtext
                             font.pixelSize: 12
                             typeScale: "labelMedium"
@@ -1915,7 +1915,7 @@ ApplicationWindow {
                             variant: MaterialButton.Variant.Tonal
                             buttonText: I18n.t("about.viewSource")
                             buttonIcon: "open_in_new"
-                            onClicked: Qt.openUrlExternally("https://github.com/Yorukazeh/Lecoo-Control-Center-GUI")
+                            onClicked: Qt.openUrlExternally("https://github.com/Yorukazeh/Lecoo-Control-Panel-QML")
                         }
                     }
 

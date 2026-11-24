@@ -6,7 +6,7 @@
 .DESCRIPTION
     Builds with cargo, then copies the Qt runtime (windeployqt), the MSVC x64
     runtime and the bundled font licenses next to
-    target\release\Lecoo-Control-Center-GUI.exe, so that the executable runs
+    target\release\Lecoo-Control-Panel-QML.exe, so that the executable runs
     without a Qt installation. The Qt runtime is never deleted - it is only
     added / updated - and the deployment is verified afterwards.
 
@@ -62,7 +62,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed" }
     }
 
-    $exe = Join-Path $releaseDir "Lecoo-Control-Center-GUI.exe"
+    $exe = Join-Path $releaseDir "Lecoo-Control-Panel-QML.exe"
     if (-not (Test-Path $exe)) {
         throw "Executable not found: $exe (run without -NoBuild first)"
     }

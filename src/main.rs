@@ -28,7 +28,8 @@ fn main() {
 
     // Application identity; the desktop file name drives the Wayland app_id.
     if let Some(mut app_ref) = app.as_mut() {
-        app_ref.as_mut().set_application_name(&QString::from("io.lecooctrl.gui"));
+        let app_id = QString::from("io.lecooctrl.qml");
+        app_ref.as_mut().set_application_name(&app_id);
         app_ref.as_mut().set_organization_name(&QString::from("lecooctrl"));
         app_ref.as_mut().set_organization_domain(&QString::from("lecooctrl.gui"));
         app_ref.as_mut().set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
@@ -38,7 +39,7 @@ fn main() {
         // Icon embedded by build.rs, so it stays valid in a packaged release.
         backend::qobject::set_application_icon();
         // Wayland app_id / X11 WM_CLASS.
-        backend::qobject::set_desktop_file_name(&QString::from("io.lecooctrl.gui"));
+        backend::qobject::set_desktop_file_name(&app_id);
     }
 
     let mut engine = QQmlApplicationEngine::new();
