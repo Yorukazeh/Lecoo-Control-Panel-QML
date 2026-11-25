@@ -13,7 +13,10 @@ set "SERVICE_NAME=LecooControlDaemon"
 set "DAEMON_EXE=lecoo-ec-daemon.exe"
 set "INSTALL_DIR=%ProgramFiles%\LecooControlCenter"
 set "CTRL_EXE=%INSTALL_DIR%\lecoo-ctrl.exe"
-set "REPO_API=https://api.github.com/repos/LaVashikk/Lecoo-Control-Center/releases?per_page=100"
+set "RELEASE_VERSION=0.6.0"
+set "RELEASE_TAG=v%RELEASE_VERSION%"
+set "PACKAGE_NAME=lecoo-%RELEASE_VERSION%-windows.zip"
+set "PACKAGE_URL=https://github.com/LaVashikk/Lecoo-Control-Center/releases/download/%RELEASE_TAG%/%PACKAGE_NAME%"
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 cd /d "%SCRIPT_DIR%" >nul 2>&1
@@ -62,14 +65,8 @@ set "UPDATE_DIR=%TEMP%\Lecoo-Ctrl-Manager"
 set "PACKAGE_DIR=%UPDATE_DIR%\package"
 set "ZIP_FILE=%UPDATE_DIR%\release.zip"
 set "INFO_FILE=%UPDATE_DIR%\installed.txt"
-set "META_FILE=%UPDATE_DIR%\release.txt"
 set "ERROR_FILE=%UPDATE_DIR%\error.txt"
 set "CURRENT_VERSION="
-set "LATEST_TAG="
-set "LATEST_VERSION="
-set "LATEST_PRERELEASE="
-set "PACKAGE_NAME="
-set "PACKAGE_URL="
 
 call :cleanup_update
 mkdir "%PACKAGE_DIR%" >nul 2>&1
@@ -102,54 +99,22 @@ if defined CURRENT_VERSION (
     echo       lecoo-ctrl is not installed.
 )
 
-echo [2/4] Checking GitHub releases...
-%PS% -NoProfile -ExecutionPolicy Bypass -Command ^
- "$ErrorActionPreference='Stop';" ^
- "$releases=Invoke-RestMethod -UseBasicParsing -Headers @{'User-Agent'='LecooControlCenter-Manager'} -Uri '%REPO_API%';" ^
- "$r=$null; $releaseDate=[datetime]::MinValue;" ^
- "foreach($candidate in $releases){ if((-not $candidate.draft) -and $candidate.published_at){ $d=[datetime]$candidate.published_at; if($d -gt $releaseDate){$r=$candidate;$releaseDate=$d} } };" ^
- "if($null -eq $r){throw 'No published GitHub release found.'};" ^
- "$a=$null; $best=-1;" ^
- "foreach($x in $r.assets){ if($x.name -match '(?i)\.zip$' -and $x.name -notmatch '(?i)(source|checksum|sha256)'){ $score=0; if($x.name -match '(?i)(windows|win)'){$score+=4}; if($x.name -match '(?i)(x64|amd64)'){$score+=2}; if($score -gt $best){$a=$x;$best=$score} } };" ^
- "if(($null -eq $a) -or ($best -lt 4)){throw 'No Windows ZIP asset found in the latest release.'};" ^
- "Set-Content -LiteralPath '%META_FILE%' -Value ($r.tag_name + '|' + $r.prerelease + '|' + $a.name + '|' + $a.browser_download_url) -Encoding ASCII" >nul 2>"%ERROR_FILE%"
-if errorlevel 1 (
-    echo [FAIL] Could not query GitHub releases.
-    type "%ERROR_FILE%" 2>nul
-    goto :update_failed
-)
-
-for /f "usebackq tokens=1-4 delims=|" %%A in ("%META_FILE%") do (
-    set "LATEST_TAG=%%A"
-    set "LATEST_PRERELEASE=%%B"
-    set "PACKAGE_NAME=%%C"
-    set "PACKAGE_URL=%%D"
-)
-set "LATEST_VERSION=%LATEST_TAG:v=%"
-for /f "tokens=1 delims=-+" %%V in ("%LATEST_VERSION%") do set "LATEST_VERSION=%%V"
-if not defined LATEST_VERSION (
-    echo [FAIL] Release tag has no semantic version: %LATEST_TAG%
-    goto :update_failed
-)
-if /i "%LATEST_PRERELEASE%"=="True" (
-    echo       Latest version: %LATEST_VERSION% - pre-release
-) else (
-    echo       Latest version: %LATEST_VERSION% - stable
-)
+echo [2/4] Using pinned upstream release %RELEASE_TAG%...
+echo       Package: %PACKAGE_NAME%
 
 if defined CURRENT_VERSION (
-    %PS% -NoProfile -ExecutionPolicy Bypass -Command "$c=[version]'%CURRENT_VERSION%'; $l=[version]'%LATEST_VERSION%'; if($c -lt $l){exit 10}"
+    %PS% -NoProfile -ExecutionPolicy Bypass -Command "$c=[version]'%CURRENT_VERSION%'; $l=[version]'%RELEASE_VERSION%'; if($c -lt $l){exit 10}"
     if errorlevel 10 (
-        echo       A newer version is available.
+        echo       The pinned version is newer than the installed version.
     ) else if errorlevel 1 (
         echo [FAIL] Could not compare versions.
         goto :update_failed
     ) else (
-        echo       Already up to date.
+        echo       Installed version is already at or newer than the pinned version.
         goto :update_success
     )
 ) else (
-    echo       Installation is required.
+    echo       Installation of the pinned version is required.
 )
 
 echo [3/4] Downloading and extracting the package...
