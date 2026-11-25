@@ -8,7 +8,7 @@ CN [中文 Readme 在这](README_CN.md)
 
 Lecoo Control Panel QML is an unofficial graphical interface for Lecoo Control Center, built using Qt 6, Rust, and QML, and designed for laptops based on Emdoor chassis (such as Lecoo Pro 14 and Lecoo N155).
 
-Lecoo Control Panel QML is an independent client. Hardware access is provided by the external [`lecoo-ctrl`](https://github.com/LaVashikk/Lecoo-Control-Center) CLI and its `lecoo-ec-daemon` backend. The GUI invokes the CLI as a subprocess and does not access the EC or `/dev` directly.
+Lecoo Control Panel QML is an independent client for [Lecoo Control Center](https://github.com/LaVashikk/Lecoo-Control-Center). Hardware queries, controls, charge policy, fan curves, and monitoring use native daemon IPC. An optional `lecoo-ctrl` fallback remains available for compatibility. The GUI never accesses the EC or `/dev` directly.
 
 ## Features
 
@@ -44,8 +44,7 @@ Lecoo Control Panel QML is an independent client. Hardware access is provided by
   - Qt 5 Compatibility Module
   - Qt Shader Tools
 - Rust stable, edition 2024.
-- An installed or otherwise available `lecoo-ctrl` executable.
-- `lecoo-ec-daemon` for hardware control.
+- `lecoo-ec-daemon` for hardware access. The `lecoo-ctrl` CLI is optional and is only used as a compatibility fallback.
 - Linux: `power-profiles-daemon` and one of `busctl`, `gdbus`, `dbus-send`, or `powerprofilesctl` to sync the system power mode (optional; without them the firmware profile is still applied and the GUI reports that the system mode was not changed).
 
 ## Build (For Developers)
@@ -56,9 +55,9 @@ cargo build --release
 
 The executable is written to `target/release/` or `target\release\` on Windows.
 
-### Configure `lecoo-ctrl`
+### Optional CLI fallback
 
-The GUI checks `LECOO_CTRL` first and then falls back to the system `PATH`.
+When IPC is unavailable or the daemon does not support a request, the GUI checks `LECOO_CTRL` first and then falls back to the system `PATH`.
 
 Linux:
 
@@ -74,7 +73,7 @@ $env:LECOO_CTRL = "C:\path\to\lecoo-ctrl.exe"
 .\target\release\Lecoo-Control-Panel-QML.exe
 ```
 
-Live monitoring starts one `lecoo-ctrl monitoring` process and reads its output.
+Live monitoring reads daemon metric snapshots over IPC; `lecoo-ctrl monitoring` is used only by the compatibility fallback.
 
 ## Windows packaging
 

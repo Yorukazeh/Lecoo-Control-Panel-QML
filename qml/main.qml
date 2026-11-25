@@ -149,6 +149,51 @@ ApplicationWindow {
         }
     }
 
+    function chargeIntentLabel(value) {
+        if (value.indexOf("range:") === 0) {
+            var range = value.slice(6).split(":")
+            return I18n.t("charge.range", range[0], range[1])
+        }
+        if (value === "preserve")
+            return I18n.t("charge.preserve")
+        return I18n.t("charge." + value)
+    }
+
+    function chargeStatusDisplay(value) {
+        var fields = String(value).split("|")
+        if (fields[0] !== "ipc" || fields.length < 5)
+            return value
+        var lines = [
+            I18n.t("charge.statusTarget", appWindow.chargeIntentLabel(fields[1])),
+            I18n.t("charge.statusEffective", appWindow.chargeIntentLabel(fields[2])),
+            I18n.t("charge.statusBattery", fields[3])
+        ]
+        if (fields[4].length > 0)
+            lines.push(I18n.t("charge.statusPending", fields[4]))
+        return lines.join("\n")
+    }
+
+    function batteryInfoDisplay(value) {
+        var fields = String(value).split("|")
+        if (fields[0] !== "ipc" || fields.length < 14)
+            return value
+        var state = I18n.t("battery.state." + fields[1])
+        var lines = [I18n.t("battery.state", state)]
+        if (fields[2].length > 0)
+            lines.push(I18n.t("battery.power", fields[2]))
+        lines.push(I18n.t("battery.voltage", fields[3], fields[4]))
+        lines.push(I18n.t("battery.charge", fields[5], fields[6], fields[7]))
+        lines.push(I18n.t("battery.energy", fields[8], fields[9]))
+        if (fields[10].length > 0)
+            lines.push(I18n.t("battery.health", fields[10]))
+        lines.push(I18n.t("battery.cycles", fields[11]))
+        if (fields[12].length > 0)
+            lines.push(I18n.t("battery.limit", appWindow.chargeIntentLabel(fields[12])))
+        if (fields.length > 13 && fields[13].length > 0)
+            lines.push(I18n.t("battery.eta", fields[13]))
+        return lines.join("\n")
+    }
+
     function storedFanCurve(text) {
         var values = String(text).split(",")
         if (values.length !== 6)
@@ -1222,7 +1267,9 @@ ApplicationWindow {
                             }
                             StyledText {
                                 Layout.fillWidth: true
-                                text: backend.chargeStatus.length > 0 ? backend.chargeStatus : I18n.t("charge.noStatus")
+                                text: backend.chargeStatus.length > 0
+                                      ? appWindow.chargeStatusDisplay(backend.chargeStatus)
+                                      : I18n.t("charge.noStatus")
                                 textFormat: Text.PlainText
                                 wrapMode: Text.Wrap
                                 color: Appearance.colors.colOnSurfaceVariant
@@ -1780,7 +1827,7 @@ ApplicationWindow {
                 id: infoPage
                 active: StackLayout.isCurrentItem
 
-                Component.onCompleted: backend.refreshCliInfo()
+                Component.onCompleted: backend.refreshDaemonInfo()
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1844,7 +1891,9 @@ ApplicationWindow {
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: backend.batteryInfo.length > 0 ? backend.batteryInfo : I18n.t("info.batteryUnavailable")
+                        text: backend.batteryInfo.length > 0
+                              ? appWindow.batteryInfoDisplay(backend.batteryInfo)
+                              : I18n.t("info.batteryUnavailable")
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         color: Appearance.colors.colOnSurface
@@ -1923,11 +1972,11 @@ ApplicationWindow {
 
                     SettingsRow {
                         icon: "terminal"
-                        title: I18n.t("about.cliTitle")
-                        subtitle: backend.cliPath.length > 0 ? backend.cliPath : I18n.t("about.cliMissing")
+                        title: I18n.t("about.daemonTitle")
+                        subtitle: backend.daemonBoard.length > 0 ? backend.daemonBoard : I18n.t("about.daemonMissing")
                         StyledText {
-                            text: backend.cliVersion.length > 0 ? "v" + backend.cliVersion : "--"
-                            color: backend.cliVersion.length > 0 ? Appearance.colors.colSuccess : Appearance.colors.colError
+                            text: backend.daemonVersion.length > 0 ? "v" + backend.daemonVersion : "--"
+                            color: backend.daemonVersion.length > 0 ? Appearance.colors.colSuccess : Appearance.colors.colError
                             font.pixelSize: 13
                             font.family: Appearance.font.family.numbers
                         }

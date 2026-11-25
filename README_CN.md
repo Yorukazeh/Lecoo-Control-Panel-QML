@@ -8,7 +8,7 @@ EN [English Readme here](README.md)
 
 Lecoo Control Panel QML 是基于 Lecoo Control Center 打造的非官方图形界面版控制中心，使用 Qt 6、Rust 和 QML 构建，专为基于 Emdoor 底盘的笔记本电脑（如 Lecoo Pro 14 / Lecoo N155）设计。
 
-本程序是独立的 GUI 客户端。硬件访问由外部 [`lecoo-ctrl`](https://github.com/LaVashikk/Lecoo-Control-Center) 命令行程序及其 `lecoo-ec-daemon` 后端负责。GUI 通过子进程调用后端，不直接访问 EC 或 `/dev`。
+本程序是 [Lecoo Control Center](https://github.com/LaVashikk/Lecoo-Control-Center) 的独立 GUI 客户端。硬件查询、控制、充电策略、风扇曲线和实时监控均通过原生 daemon IPC 完成；为兼容旧环境，IPC 不可用或请求不受支持时仍可回退到可选的 `lecoo-ctrl`。GUI 不直接访问 EC 或 `/dev`。
 
 ## 功能
 
@@ -45,8 +45,7 @@ Lecoo Control Panel QML 是基于 Lecoo Control Center 打造的非官方图形�
   - Qt 5 Compatibility Module
   - Qt Shader Tools
 - Rust stable，edition 2024。
-- 已安装或可定位的 `lecoo-ctrl`。
-- 运行硬件控制功能时，需要后端项目提供的 `lecoo-ec-daemon`。
+- 后端项目提供的 `lecoo-ec-daemon`。`lecoo-ctrl` 为可选依赖，仅用于 IPC 兼容回退。
 - Linux：`power-profiles-daemon`，以及 `busctl`、`gdbus`、`dbus-send`、`powerprofilesctl` 之一，用于同步系统电源方案（可选；缺少时仍会应用硬件配置，并提示系统电源方案未切换）。
 
 ## 构建（面向开发者）
@@ -85,9 +84,9 @@ $env:LECOO_CTRL = "C:\path\to\lecoo-ctrl.exe"
 .\target\release\Lecoo-Control-Panel-QML.exe
 ```
 
-如果不设置 `LECOO_CTRL`，将 `lecoo-ctrl` 安装到系统 `PATH` 即可。
+当 IPC 不可用或 daemon 不支持对应请求时，GUI 会优先检查 `LECOO_CTRL`，然后检查系统 `PATH`。
 
-实时监控会启动一个 `lecoo-ctrl monitoring` 进程并读取其输出。
+实时监控通过 IPC 读取 daemon 指标快照；仅在兼容回退时使用 `lecoo-ctrl monitoring` 进程。
 
 ## Windows 打包
 

@@ -14,11 +14,10 @@ use cxx_qt_lib::{QString, QTime};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-/// Prevent Windows CLI calls from opening a console window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Highest fan PWM value accepted by the CLI.
+/// Highest fan duty accepted by the supported profiles.
 const FAN_PWM_MAX: i32 = 220;
 const LED_PRESETS: &[&str] = &[
     "smooth",
@@ -108,6 +107,11 @@ impl FanCurve {
     }
 }
 
+enum ChargeAction {
+    Preset(String),
+    Range(u8, u8),
+}
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -175,8 +179,8 @@ pub mod qobject {
         #[qproperty(QString, error_message, cxx_name = "errorMessage")]
         #[qproperty(QString, last_update, cxx_name = "lastUpdate")]
         #[qproperty(QString, app_version, cxx_name = "appVersion")]
-        #[qproperty(QString, cli_path, cxx_name = "cliPath")]
-        #[qproperty(QString, cli_version, cxx_name = "cliVersion")]
+        #[qproperty(QString, daemon_board, cxx_name = "daemonBoard")]
+        #[qproperty(QString, daemon_version, cxx_name = "daemonVersion")]
         type ControlCenter = super::ControlCenterRust;
 
         #[qinvokable]
@@ -240,8 +244,8 @@ pub mod qobject {
         fn led_presets(&self) -> QStringList;
 
         #[qinvokable]
-        #[cxx_name = "refreshCliInfo"]
-        fn refresh_cli_info(self: Pin<&mut Self>);
+        #[cxx_name = "refreshDaemonInfo"]
+        fn refresh_daemon_info(self: Pin<&mut Self>);
 
         // Platform default font families, read once at startup (no text font is bundled).
         #[qinvokable]
@@ -310,8 +314,8 @@ pub struct ControlCenterRust {
     error_message: QString,
     last_update: QString,
     app_version: QString,
-    cli_path: QString,
-    cli_version: QString,
+    daemon_board: QString,
+    daemon_version: QString,
     monitor: Arc<Mutex<MonitorState>>,
     fan_curves: Arc<Mutex<[FanCurve; 2]>>,
     fan_curve_interval: Arc<Mutex<u64>>,
@@ -340,8 +344,8 @@ impl Default for ControlCenterRust {
             error_message: QString::default(),
             last_update: QString::default(),
             app_version: QString::from(env!("CARGO_PKG_VERSION")),
-            cli_path: QString::default(),
-            cli_version: QString::default(),
+            daemon_board: QString::default(),
+            daemon_version: QString::default(),
             monitor: Arc::new(Mutex::new(MonitorState::default())),
             fan_curves: Arc::new(Mutex::new([FanCurve::default(), FanCurve::default()])),
             fan_curve_interval: Arc::new(Mutex::new(2000)),
@@ -356,8 +360,9 @@ impl Drop for ControlCenterRust {
         state.stop();
         drop(state);
         // Do not leave the firmware in the last curve PWM after closing.
-        let _ = run_cli(&["fan", "cpu", "auto"]);
-        let _ = run_cli(&["fan", "gpu", "auto"]);
+        if let Some(requests) = fan_requests("both", "auto", 0) {
+            let _ = daemon_write_or_cli(&requests, &["fan", "both", "auto"]);
+        }
     }
 }
 
@@ -459,38 +464,6 @@ fn read_stderr(mut stderr: ChildStderr) -> String {
     text.trim().to_owned()
 }
 
-/// Return the absolute CLI path for the About card.
-fn resolve_cli_path() -> Option<PathBuf> {
-    if let Ok(raw) = std::env::var("LECOO_CTRL") {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            let candidate = PathBuf::from(trimmed);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    let name = if cfg!(windows) { "lecoo-ctrl.exe" } else { "lecoo-ctrl" };
-    let search = std::env::var_os("PATH")?;
-    std::env::split_paths(&search)
-        .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
-}
-
-fn run_binary(binary: &Path, args: &[&str]) -> Result<String, String> {
-    run_command(binary, args).map_err(|error| error.to_string()).and_then(command_result)
-}
-
-/// `lecoo-ctrl --version` prints `<bin> v<semver>`; keep just the version.
-fn version_from_banner(banner: &str) -> String {
-    let token = banner.split_whitespace().last().unwrap_or_default();
-    match token.strip_prefix('v') {
-        Some(rest) if rest.starts_with(|ch: char| ch.is_ascii_digit()) => rest.to_owned(),
-        _ => token.to_owned(),
-    }
-}
-
 fn numbers(text: &str) -> Vec<i32> {
     text.split(|ch: char| !ch.is_ascii_digit())
         .filter_map(|part| part.parse::<i32>().ok())
@@ -550,6 +523,346 @@ fn qstring(value: impl Into<String>) -> QString {
     QString::from(value.into())
 }
 
+fn read_daemon<T>(
+    native: impl FnOnce(&mut ipc::IpcClient) -> Result<T, String>,
+    legacy: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    // Keep explicit CLI overrides and older daemon versions working during migration.
+    if std::env::var("LECOO_CTRL").is_ok_and(|path| !path.trim().is_empty()) {
+        return legacy();
+    }
+    match ipc::IpcClient::connect() {
+        Ok(mut client) => native(&mut client).or_else(|_| legacy()),
+        Err(_) => legacy(),
+    }
+}
+
+fn daemon_response(
+    client: &mut ipc::IpcClient,
+    request: ipc::IpcRequest,
+) -> Result<ipc::IpcResponse, String> {
+    match client.request(&request).map_err(|error| error.to_string())? {
+        ipc::IpcResponse::Error(error) => Err(error.message),
+        response => Ok(response),
+    }
+}
+
+fn daemon_temperatures(response: ipc::IpcResponse) -> Result<(i32, i32), String> {
+    match response {
+        ipc::IpcResponse::Temps { cpu_c, sys_c } => Ok((cpu_c.into(), sys_c.into())),
+        _ => Err("backend.error.parse_temps".to_owned()),
+    }
+}
+
+fn daemon_fans(response: ipc::IpcResponse) -> Result<(i32, i32), String> {
+    match response {
+        ipc::IpcResponse::FanRpm { cpu, gpu } => Ok((cpu.into(), gpu.into())),
+        _ => Err("backend.error.parse_fans".to_owned()),
+    }
+}
+
+fn power_request(profile: &str) -> Option<ipc::IpcRequest> {
+    use ipc::IpcRequest;
+    use lecoo_types::ec_types::PowerProfile;
+
+    let profile = match profile {
+        "silent" => PowerProfile::Silent,
+        "default" => PowerProfile::Default,
+        "perf" => PowerProfile::Performance,
+        _ => return None,
+    };
+    Some(IpcRequest::SetPowerProfile(profile))
+}
+
+fn fan_requests(target: &str, mode: &str, pwm: i32) -> Option<Vec<ipc::IpcRequest>> {
+    use ipc::IpcRequest;
+    use lecoo_types::ec_types::{FanIndex, FanMode};
+
+    let mode = match mode {
+        "auto" => FanMode::Auto,
+        "full" => FanMode::Full,
+        "turbo" => FanMode::Turbo,
+        "custom" => FanMode::Custom(pwm.clamp(0, FAN_PWM_MAX) as u8),
+        _ => return None,
+    };
+    let fans: &[FanIndex] = match target {
+        "cpu" => &[FanIndex::Cpu],
+        "gpu" => &[FanIndex::Gpu],
+        "both" => &[FanIndex::Cpu, FanIndex::Gpu],
+        _ => return None,
+    };
+    Some(fans.iter().map(|fan| IpcRequest::SetFanMode { fan: *fan, mode }).collect())
+}
+
+fn keyboard_request(mode: &str, pwm: i32) -> Option<ipc::IpcRequest> {
+    use ipc::IpcRequest;
+    use lecoo_types::ec_types::KeyboardBacklightLevel;
+
+    let level = match mode {
+        "off" => KeyboardBacklightLevel::Off,
+        "low" => KeyboardBacklightLevel::Low,
+        "medium" => KeyboardBacklightLevel::Medium,
+        "high" => KeyboardBacklightLevel::High,
+        "custom" => KeyboardBacklightLevel::Custom(pwm.clamp(0, 255) as u8),
+        _ => return None,
+    };
+    Some(IpcRequest::SetKeyboardBacklight(level))
+}
+
+fn led_request(mode: &str, value: i32, preset: &str, sleep: bool) -> Option<ipc::IpcRequest> {
+    use ipc::{DaemonCommand, IpcRequest};
+    use lecoo_types::ec_types::{BreathConfig, PowerLedMode};
+
+    if mode == "overheat" && !sleep && (0..=255).contains(&value) {
+        return Some(IpcRequest::DaemonCommand(DaemonCommand::SetOverheatAlert(
+            (value != 0).then_some(value as u8),
+        )));
+    }
+    if mode == "flash" && !sleep && (1..=u16::MAX as i32).contains(&value) {
+        return BreathConfig::by_name(preset)
+            .map(|effect| IpcRequest::FlashLed { effect, duration_ms: value as u16 });
+    }
+    let led_mode = match mode {
+        "auto" => PowerLedMode::Auto,
+        "custom" => PowerLedMode::Custom(value.clamp(0, 255) as u8),
+        "breath" => PowerLedMode::Animation(BreathConfig::by_name(preset)?),
+        _ => return None,
+    };
+    Some(if sleep {
+        IpcRequest::DaemonCommand(DaemonCommand::SetLedOnSleep(led_mode))
+    } else {
+        IpcRequest::SetLedMode(led_mode)
+    })
+}
+
+fn daemon_write(requests: &[ipc::IpcRequest]) -> Result<Option<()>, String> {
+    if std::env::var("LECOO_CTRL").is_ok_and(|path| !path.trim().is_empty()) {
+        return Ok(None);
+    }
+    let Ok(mut client) = ipc::IpcClient::connect() else {
+        return Ok(None);
+    };
+    for request in requests {
+        match client.request(request).map_err(|error| error.to_string())? {
+            ipc::IpcResponse::Success => {}
+            ipc::IpcResponse::Error(error) if error.code == ipc::ErrorCode::UnsupportedRequest => {
+                return Ok(None);
+            }
+            ipc::IpcResponse::Error(error) => return Err(error.message),
+            _ => return Err("backend.error.unexpected_daemon_response".to_owned()),
+        }
+    }
+    Ok(Some(()))
+}
+
+fn daemon_write_with_client(client: &mut ipc::IpcClient, request: &ipc::IpcRequest) -> Result<bool, String> {
+    match client.request(request).map_err(|error| error.to_string())? {
+        ipc::IpcResponse::Success => Ok(true),
+        ipc::IpcResponse::Error(error) if error.code == ipc::ErrorCode::UnsupportedRequest => Ok(false),
+        ipc::IpcResponse::Error(error) => Err(error.message),
+        _ => Err("backend.error.unexpected_daemon_response".to_owned()),
+    }
+}
+
+fn daemon_write_or_cli(requests: &[ipc::IpcRequest], args: &[&str]) -> Result<(), String> {
+    match daemon_write(requests)? {
+        Some(()) => Ok(()),
+        None => run_cli(args).map(|_| ()),
+    }
+}
+
+fn preset_order(name: &str) -> u8 {
+    match name {
+        "full" => 0,
+        "high" => 1,
+        "balanced" => 2,
+        "lifespan" => 3,
+        "desk" => 4,
+        "hold" => 5,
+        _ => u8::MAX,
+    }
+}
+
+fn charge_presets_from_caps(caps: &lecoo_types::caps::Capabilities) -> cxx_qt_lib::QStringList {
+    let mut names: Vec<_> = caps.charge.presets.iter().map(|(name, _)| name.as_str()).collect();
+    names.sort_by_key(|name| preset_order(name));
+    let mut presets = cxx_qt_lib::QStringList::default();
+    for name in names {
+        presets.append(qstring(name));
+    }
+    presets
+}
+
+fn charge_intent_name(intent: &lecoo_types::ec_types::ChargeIntent) -> String {
+    use lecoo_types::ec_types::ChargeIntent;
+    match intent {
+        ChargeIntent::Full => "full".to_owned(),
+        ChargeIntent::Preserve(Some(range)) => format!("range:{}:{}", range.min, range.max),
+        ChargeIntent::Preserve(None) => "preserve".to_owned(),
+        ChargeIntent::Freeze => "hold".to_owned(),
+    }
+}
+
+fn charge_status_summary(status: &lecoo_types::caps::ChargeStatus) -> String {
+    format!(
+        "ipc|{}|{}|{}|{}",
+        charge_intent_name(&status.desired),
+        charge_intent_name(&status.effective),
+        status.soc,
+        status.pending.as_deref().unwrap_or("")
+    )
+}
+
+fn battery_info_ipc(
+    info: &lecoo_types::ec_types::BatteryInfo,
+    status: Option<&lecoo_types::caps::ChargeStatus>,
+) -> String {
+    let state = match info.current_ma.signum() {
+        1 => "charging",
+        -1 => "discharging",
+        _ => "idle",
+    };
+    let power = if info.power_w() != 0.0 { format!("{:+.1} W", info.power_w()) } else { String::new() };
+    let voltage = format!("{:.2}", info.voltage_mv as f32 / 1000.0);
+    let voltage_cell = info.cell_mv().map(|cell| format!("{:.2}", cell as f32 / 1000.0)).unwrap_or_default();
+    let percent = info.charge_pct().map(|value| format!("{value:.1}")).unwrap_or_default();
+    let health = info.health_pct().map(|value| format!("{value:.1}")).unwrap_or_default();
+    let limit = status.map(|status| charge_intent_name(&status.effective)).unwrap_or_default();
+    let eta = status
+        .and_then(|status| info.eta_min(charge_stop_percent(status)))
+        .map(|minutes| minutes.to_string())
+        .unwrap_or_default();
+    format!(
+        "ipc|{state}|{power}|{voltage}|{voltage_cell}|{}|{}|{percent}|{:.1}|{:.1}|{health}|{}|{limit}|{eta}",
+        info.remaining_mah,
+        info.full_mah,
+        info.remaining_wh(),
+        info.full_wh(),
+        info.cycles,
+    )
+}
+
+fn charge_stop_percent(status: &lecoo_types::caps::ChargeStatus) -> u8 {
+    use lecoo_types::ec_types::ChargeIntent;
+    match status.effective {
+        ChargeIntent::Preserve(Some(range)) => range.max,
+        ChargeIntent::Preserve(None) => status.thresholds.map_or(100, |(_, max)| max),
+        ChargeIntent::Full | ChargeIntent::Freeze => 100,
+    }
+}
+
+fn charge_intent_from_preset(
+    caps: &lecoo_types::caps::Capabilities,
+    preset: &str,
+) -> Option<lecoo_types::ec_types::ChargeIntent> {
+    caps.charge
+        .presets
+        .iter()
+        .find_map(|(name, intent)| name.eq_ignore_ascii_case(preset).then_some(*intent))
+}
+
+fn native_charge_presets_response(
+    response: ipc::IpcResponse,
+) -> Result<lecoo_types::caps::Capabilities, String> {
+    match response {
+        ipc::IpcResponse::Capabilities(caps) => Ok(*caps),
+        _ => Err("backend.error.unexpected_capabilities".to_owned()),
+    }
+}
+
+fn native_charge_status_response(response: ipc::IpcResponse) -> Result<String, String> {
+    match response {
+        ipc::IpcResponse::ChargeStatus(status) => Ok(charge_status_summary(&status)),
+        _ => Err("backend.error.unexpected_charge_status".to_owned()),
+    }
+}
+
+fn native_battery_response(response: ipc::IpcResponse) -> Result<lecoo_types::ec_types::BatteryInfo, String> {
+    match response {
+        ipc::IpcResponse::BatteryInfo(info) => Ok(info),
+        _ => Err("backend.error.unexpected_battery_info".to_owned()),
+    }
+}
+
+fn charge_action_request(
+    caps: &lecoo_types::caps::Capabilities,
+    action: &ChargeAction,
+) -> Result<ipc::IpcRequest, String> {
+    use lecoo_types::ec_types::{ChargeIntent, ChargeRange};
+
+    let intent = match action {
+        ChargeAction::Preset(name) => charge_intent_from_preset(caps, name)
+            .ok_or_else(|| "backend.error.unsupported_charge_mode".to_owned())?,
+        ChargeAction::Range(min, max) => {
+            let Some((low, high)) = caps.charge.custom_range else {
+                return Err("backend.error.unsupported_charge_range".to_owned());
+            };
+            if min >= max || *min < low || *max > high {
+                return Err("charge.invalidRange".to_owned());
+            }
+            ChargeIntent::Preserve(Some(ChargeRange { min: *min, max: *max }))
+        }
+    };
+    Ok(ipc::IpcRequest::SetChargeIntent(intent))
+}
+
+fn apply_charge_native_or_cli(action: ChargeAction, cli_args: Vec<String>) -> Result<String, String> {
+    let legacy = || {
+        let args: Vec<_> = std::iter::once("charge").chain(cli_args.iter().map(String::as_str)).collect();
+        run_cli(&args).map(|_| run_cli(&["charge"]).unwrap_or_default())
+    };
+    if std::env::var("LECOO_CTRL").is_ok_and(|path| !path.trim().is_empty()) {
+        return legacy();
+    }
+    let Ok(mut client) = ipc::IpcClient::connect() else {
+        return legacy();
+    };
+    let caps = match daemon_response(
+        &mut client,
+        ipc::IpcRequest::DaemonCommand(ipc::DaemonCommand::GetCapabilities),
+    )
+    .and_then(native_charge_presets_response)
+    {
+        Ok(caps) => caps,
+        Err(_) => return legacy(),
+    };
+    let request = match charge_action_request(&caps, &action) {
+        Ok(request) => request,
+        Err(error)
+            if matches!(
+                error.as_str(),
+                "backend.error.unsupported_charge_mode" | "backend.error.unsupported_charge_range"
+            ) =>
+        {
+            return legacy();
+        }
+        Err(error) => return Err(error),
+    };
+    if !daemon_write_with_client(&mut client, &request)? {
+        return legacy();
+    }
+    daemon_response(&mut client, ipc::IpcRequest::GetChargeStatus).and_then(native_charge_status_response)
+}
+
+fn power_profile_from_response(response: ipc::IpcResponse) -> Result<String, String> {
+    match response {
+        ipc::IpcResponse::PowerLimit(profile) => Ok(match profile {
+            lecoo_types::ec_types::PowerProfile::Silent => "silent",
+            lecoo_types::ec_types::PowerProfile::Default => "default",
+            lecoo_types::ec_types::PowerProfile::Performance => "perf",
+        }
+        .to_owned()),
+        _ => Err("backend.error.unexpected_power_response".to_owned()),
+    }
+}
+
+fn read_sensor_pair(command: &str, error: &str) -> Result<(i32, i32), String> {
+    match numbers(&run_cli(&[command])?).as_slice() {
+        [first, second, ..] => Ok((*first, *second)),
+        _ => Err(error.to_owned()),
+    }
+}
+
 fn battery_details(output: &str) -> &str {
     // The card already has a title; all upstream locales prefix the CLI heading with 🔋.
     let (first, rest) = output.split_once('\n').unwrap_or((output, ""));
@@ -585,15 +898,7 @@ fn charge_presets(help: &str) -> cxx_qt_lib::QStringList {
             presets.push(name.to_owned());
         }
     }
-    presets.sort_by_key(|preset| match preset.as_str() {
-        "full" => 0,
-        "high" => 1,
-        "balanced" => 2,
-        "lifespan" => 3,
-        "desk" => 4,
-        "hold" => 5,
-        _ => unreachable!(),
-    });
+    presets.sort_by_key(|preset| preset_order(preset));
     let mut result = cxx_qt_lib::QStringList::default();
     for preset in presets {
         result.append(qstring(preset));
@@ -629,7 +934,7 @@ impl qobject::ControlCenter {
         self.as_mut().set_status_message(qstring("backend.error.operation_failed"));
     }
 
-    /// Run blocking CLI work off the Qt thread and apply its result on the Qt thread.
+    /// Run blocking backend work off the Qt thread and apply its result on the Qt thread.
     fn run_async<T, W, A>(self: Pin<&mut Self>, work: W, apply: A)
     where
         T: Send + 'static,
@@ -646,58 +951,80 @@ impl qobject::ControlCenter {
     pub fn refresh_all(mut self: Pin<&mut Self>) {
         self.as_mut().begin();
         self.run_async(
-            || (run_cli(&["temps"]), run_cli(&["fans"])),
-            |mut obj, (temps, fans)| {
-                let mut failed = None;
-                match temps {
-                    Ok(output) => {
-                        let values = numbers(&output);
-                        if values.len() >= 2 {
-                            obj.as_mut().set_cpu_temperature(values[0]);
-                            obj.as_mut().set_system_temperature(values[1]);
-                        } else {
-                            failed = Some("backend.error.parse_temps".to_owned());
+            || {
+                use ipc::IpcRequest;
+                read_daemon(
+                    |client| {
+                        let temps = daemon_response(client, IpcRequest::GetTemperatures)
+                            .and_then(daemon_temperatures);
+                        let fans = daemon_response(client, IpcRequest::GetFansRPM).and_then(daemon_fans);
+                        match (temps, fans) {
+                            (Ok(temps), Ok(fans)) => Ok((temps, fans)),
+                            (Err(error), _) | (_, Err(error)) => Err(error),
                         }
-                    }
-                    Err(error) => failed = Some(error),
-                }
-
-                match fans {
-                    Ok(output) => {
-                        let values = numbers(&output);
-                        if values.len() >= 2 {
-                            obj.as_mut().set_cpu_fan_rpm(values[0]);
-                            obj.as_mut().set_gpu_fan_rpm(values[1]);
-                        } else if failed.is_none() {
-                            failed = Some("backend.error.parse_fans".to_owned());
-                        }
-                    }
-                    Err(error) => {
-                        if failed.is_none() {
-                            failed = Some(error);
-                        }
-                    }
-                }
-
-                if let Some(error) = failed {
-                    obj.fail(error);
-                } else {
+                    },
+                    || {
+                        Ok((
+                            read_sensor_pair("temps", "backend.error.parse_temps")?,
+                            read_sensor_pair("fans", "backend.error.parse_fans")?,
+                        ))
+                    },
+                )
+            },
+            |mut obj, result| match result {
+                Ok(((cpu, system), (cpu_fan, gpu_fan))) => {
+                    obj.as_mut().set_cpu_temperature(cpu);
+                    obj.as_mut().set_system_temperature(system);
+                    obj.as_mut().set_cpu_fan_rpm(cpu_fan);
+                    obj.as_mut().set_gpu_fan_rpm(gpu_fan);
                     obj.as_mut().set_connected(true);
                     obj.finish("backend.status.monitor_updated");
                 }
+                Err(error) => obj.fail(error),
             },
         );
     }
 
     pub fn refresh_info(mut self: Pin<&mut Self>) {
         self.as_mut().begin();
-        // An unsupported battery query must not affect the controller connection status.
         self.as_mut().run_async(
-            || run_cli(&["battery"]).unwrap_or_default(),
-            |mut obj, output| obj.as_mut().set_battery_info(qstring(battery_details(&output))),
+            || {
+                read_daemon(
+                    |client| {
+                        let info = native_battery_response(daemon_response(
+                            client,
+                            ipc::IpcRequest::GetBatteryInfo,
+                        )?)?;
+                        let charge = (info.current_ma >= 0)
+                            .then(|| daemon_response(client, ipc::IpcRequest::GetChargeStatus).ok())
+                            .flatten()
+                            .and_then(|response| match response {
+                                ipc::IpcResponse::ChargeStatus(status) => Some(status),
+                                _ => None,
+                            });
+                        Ok(battery_info_ipc(&info, charge.as_ref()))
+                    },
+                    || run_cli(&["battery"]).map(|output| battery_details(&output).to_owned()),
+                )
+            },
+            |mut obj, output| match output {
+                Ok(output) => obj.as_mut().set_battery_info(qstring(output)),
+                Err(error) => obj.as_mut().set_battery_info(qstring(battery_details(&error))),
+            },
         );
         self.run_async(
-            || run_cli(&["info"]),
+            || {
+                read_daemon(
+                    |client| match daemon_response(client, ipc::IpcRequest::GetSystemState)? {
+                        ipc::IpcResponse::SystemInfo(info) => Ok(format!(
+                            "{} ({})\nHRAM: 0x{:04X}\nlecoo-ec-daemon v{}",
+                            info.chip, info.revision, info.hram_offset, info.daemon_version
+                        )),
+                        _ => Err("backend.error.unexpected_controller_info".to_owned()),
+                    },
+                    || run_cli(&["info"]),
+                )
+            },
             |mut obj, result| match result {
                 Ok(output) => {
                     obj.as_mut().set_connected(true);
@@ -709,21 +1036,29 @@ impl qobject::ControlCenter {
         );
     }
 
-    /// Read the CLI path and version for the About card.
-    pub fn refresh_cli_info(self: Pin<&mut Self>) {
+    /// Read the daemon board and version for the About card.
+    pub fn refresh_daemon_info(self: Pin<&mut Self>) {
         self.run_async(
-            || match resolve_cli_path() {
-                Some(binary) => {
-                    let version = run_binary(&binary, &["--version"])
-                        .map(|banner| version_from_banner(&banner))
-                        .unwrap_or_default();
-                    (binary.display().to_string(), version)
-                }
-                None => (String::new(), String::new()),
+            || {
+                read_daemon(
+                    |client| match daemon_response(
+                        client,
+                        ipc::IpcRequest::DaemonCommand(ipc::DaemonCommand::GetCapabilities),
+                    )? {
+                        ipc::IpcResponse::Capabilities(caps) => Ok((caps.board, caps.daemon_version)),
+                        _ => Err("backend.error.unexpected_capabilities".to_owned()),
+                    },
+                    || {
+                        let output = run_cli(&["info"])?;
+                        Ok((output, String::new()))
+                    },
+                )
             },
-            |mut obj, (path, version)| {
-                obj.as_mut().set_cli_path(qstring(path));
-                obj.as_mut().set_cli_version(qstring(version));
+            |mut obj, result| {
+                if let Ok((board, version)) = result {
+                    obj.as_mut().set_daemon_board(qstring(board));
+                    obj.as_mut().set_daemon_version(qstring(version));
+                }
             },
         );
     }
@@ -776,20 +1111,34 @@ impl qobject::ControlCenter {
 
     pub fn refresh_power_profile(self: Pin<&mut Self>) {
         self.run_async(
-            || run_cli(&["power"]),
+            || {
+                read_daemon(
+                    |client| {
+                        daemon_response(client, ipc::IpcRequest::GetPowerProfile)
+                            .and_then(power_profile_from_response)
+                    },
+                    || {
+                        let output = run_cli(&["power"])?;
+                        let normalized = output.to_lowercase();
+                        match if normalized.contains("performance") {
+                            Some("perf")
+                        } else if normalized.contains("silent") {
+                            Some("silent")
+                        } else if normalized.contains("default") {
+                            Some("default")
+                        } else {
+                            None
+                        } {
+                            Some(profile) => Ok(profile.to_owned()),
+                            None => Err("backend.error.unexpected_power_response".to_owned()),
+                        }
+                    },
+                )
+            },
             |mut obj, result| {
-                let Ok(output) = result else { return };
-                let normalized = output.to_lowercase();
-                let profile = if normalized.contains("performance") {
-                    "perf"
-                } else if normalized.contains("silent") {
-                    "silent"
-                } else if normalized.contains("default") {
-                    "default"
-                } else {
-                    return;
+                if let Ok(profile) = result {
+                    obj.as_mut().set_power_profile(qstring(profile));
                 };
-                obj.as_mut().set_power_profile(qstring(profile));
             },
         );
     }
@@ -833,10 +1182,10 @@ impl qobject::ControlCenter {
         drop(curves);
 
         for (target, pwm) in commands {
-            let args = ["fan".to_owned(), target.to_owned(), "custom".to_owned(), pwm.to_string()];
             std::thread::spawn(move || {
-                let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-                let _ = run_cli(&refs);
+                let requests = fan_requests(target, "custom", pwm).unwrap_or_default();
+                let pwm = pwm.to_string();
+                let _ = daemon_write_or_cli(&requests, &["fan", target, "custom", pwm.as_str()]);
             });
         }
     }
@@ -898,45 +1247,12 @@ impl qobject::ControlCenter {
             return;
         }
 
-        // Sample at least as fast as the curve can apply PWM.
         let millis = *self.fan_curve_interval.lock().unwrap_or_else(|error| error.into_inner());
-        let rate = if millis < 1000 { format!("{:.1}", millis as f64 / 1000.0) } else { "1".to_owned() };
-
-        let started = {
+        let (generation, monitor) = {
             let mut state = self.monitor.lock().unwrap_or_else(|error| error.into_inner());
             state.stop();
             state.generation = state.generation.wrapping_add(1);
-            let generation = state.generation;
-
-            match spawn_cli(&["monitoring", "--rate", &rate]) {
-                Ok(mut child) => match child.stdout.take() {
-                    Some(stdout) => {
-                        let stderr = child.stderr.take();
-                        let process = Arc::new(MonitorProcess::new(child));
-                        state.process = Some(Arc::clone(&process));
-                        Ok((generation, process, stdout, stderr))
-                    }
-                    None => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        Err(io::Error::other("lecoo-ctrl monitoring has no output stream"))
-                    }
-                },
-                Err(error) => Err(error),
-            }
-        };
-
-        let (generation, process, stdout, stderr) = match started {
-            Ok(started) => started,
-            Err(error) => {
-                self.as_mut().set_monitoring(false);
-                if error.kind() == io::ErrorKind::NotFound {
-                    self.as_mut().fail("backend.error.cli_unavailable");
-                } else {
-                    self.as_mut().fail(error.to_string());
-                }
-                return;
-            }
+            (state.generation, Arc::clone(&self.monitor))
         };
 
         let qt_thread = self.qt_thread();
@@ -945,41 +1261,119 @@ impl qobject::ControlCenter {
         self.as_mut().set_status_message(qstring("backend.status.monitor_started"));
 
         std::thread::spawn(move || {
+            let still_current =
+                || monitor.lock().map(|state| state.generation == generation).unwrap_or(false);
+            let publish = |cpu: i32, system: i32, cpu_fan: i32, gpu_fan: i32| {
+                let _ = qt_thread.queue(move |mut obj| {
+                    if !obj.monitor_is_current(generation) {
+                        return;
+                    }
+                    obj.as_mut().set_cpu_temperature(cpu);
+                    obj.as_mut().set_system_temperature(system);
+                    obj.as_mut().set_cpu_fan_rpm(cpu_fan);
+                    obj.as_mut().set_gpu_fan_rpm(gpu_fan);
+                    obj.as_mut().set_connected(true);
+                    obj.as_mut().set_last_update(qstring(now_label()));
+                    obj.apply_fan_curves();
+                });
+            };
+            let fallback = if std::env::var("LECOO_CTRL").is_ok_and(|path| !path.trim().is_empty()) {
+                true
+            } else {
+                match ipc::IpcClient::connect() {
+                    Ok(mut client) => loop {
+                        if !still_current() {
+                            return;
+                        }
+                        let poll_ms = millis.clamp(1000, u16::MAX as u64) as u16;
+                        let request = ipc::IpcRequest::GetMetrics { live: Some(poll_ms), since: None };
+                        match client.request(&request) {
+                            Ok(ipc::IpcResponse::Metrics(metrics)) => {
+                                if let Some(sample) = metrics.last {
+                                    publish(
+                                        sample.cpu_c.into(),
+                                        sample.sys_c.into(),
+                                        sample.cpu_fan_rpm.into(),
+                                        sample.gpu_fan_rpm.into(),
+                                    );
+                                }
+                                std::thread::sleep(Duration::from_millis(1000));
+                            }
+                            Ok(ipc::IpcResponse::Error(error))
+                                if error.code == ipc::ErrorCode::UnsupportedRequest =>
+                            {
+                                break true;
+                            }
+                            _ => break true,
+                        }
+                    },
+                    Err(_) => true,
+                }
+            };
+
+            if !fallback || !still_current() {
+                return;
+            }
+
+            let rate = if millis < 1000 { format!("{:.1}", millis as f64 / 1000.0) } else { "1".to_owned() };
+            let mut child = match spawn_cli(&["monitoring", "--rate", &rate]) {
+                Ok(child) => child,
+                Err(error) => {
+                    let message = if error.kind() == io::ErrorKind::NotFound {
+                        "backend.error.cli_unavailable".to_owned()
+                    } else {
+                        error.to_string()
+                    };
+                    let _ = qt_thread.queue(move |mut obj| {
+                        if obj.monitor_is_current(generation) {
+                            obj.as_mut().set_monitoring(false);
+                            obj.as_mut().set_error_message(qstring(message));
+                        }
+                    });
+                    return;
+                }
+            };
+            let (Some(stdout), stderr) = (child.stdout.take(), child.stderr.take()) else {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            };
+            let process = Arc::new(MonitorProcess::new(child));
+            {
+                let mut state = monitor.lock().unwrap_or_else(|error| error.into_inner());
+                if state.generation != generation {
+                    process.stop();
+                    return;
+                }
+                state.process = Some(Arc::clone(&process));
+            }
             let stderr = stderr.map(|stderr| std::thread::spawn(move || read_stderr(stderr)));
             let mut reader = BufReader::new(stdout);
             let mut line = Vec::new();
-
             loop {
+                if !still_current() {
+                    break;
+                }
                 match read_monitor_line(&mut reader, &mut line) {
                     Ok(0) => break,
                     Ok(_) => {
                         let text = String::from_utf8_lossy(&line);
                         if let Some((cpu, system, cpu_fan, gpu_fan)) = monitoring_values(&text) {
-                            let _ = qt_thread.queue(move |mut obj| {
-                                if !obj.monitor_is_current(generation) {
-                                    return;
-                                }
-                                obj.as_mut().set_cpu_temperature(cpu);
-                                obj.as_mut().set_system_temperature(system);
-                                obj.as_mut().set_cpu_fan_rpm(cpu_fan);
-                                obj.as_mut().set_gpu_fan_rpm(gpu_fan);
-                                obj.as_mut().set_connected(true);
-                                obj.as_mut().set_last_update(qstring(now_label()));
-                                obj.apply_fan_curves();
-                            });
+                            publish(cpu, system, cpu_fan, gpu_fan);
                         }
                     }
                     Err(_) => break,
                 }
             }
-
             {
                 let mut child = process.child.lock().unwrap_or_else(|error| error.into_inner());
                 if let Some(mut child) = child.take() {
                     let _ = child.wait();
                 }
             }
-
+            if !still_current() {
+                return;
+            }
             let detail = stderr.and_then(|handle| handle.join().ok()).unwrap_or_default();
             let message = if detail.is_empty() { "backend.error.monitor_stopped".to_owned() } else { detail };
             let _ = qt_thread.queue(move |mut obj| {
@@ -1005,7 +1399,11 @@ impl qobject::ControlCenter {
         let profile_arg = profile.clone();
         self.run_async(
             move || {
-                let firmware = run_cli(&["power", &profile_arg]);
+                let Some(request) = power_request(&profile_arg) else {
+                    return (Err("backend.error.unsupported_power_profile".to_owned()), Ok(()));
+                };
+                let args = ["power", profile_arg.as_str()];
+                let firmware = daemon_write_or_cli(&[request], &args);
                 // Never move the system power mode when the firmware rejected
                 if firmware.is_err() {
                     return (firmware, Ok(()));
@@ -1062,11 +1460,14 @@ impl qobject::ControlCenter {
         let mode_arg = mode.clone();
         self.run_async(
             move || {
-                if mode_arg == "custom" {
-                    run_cli(&["fan", &target_arg, &mode_arg, &pwm_text])
+                let requests = fan_requests(&target_arg, &mode_arg, pwm)
+                    .ok_or_else(|| "backend.error.unsupported_fan_mode".to_owned())?;
+                let args = if mode_arg == "custom" {
+                    vec!["fan", target_arg.as_str(), mode_arg.as_str(), pwm_text.as_str()]
                 } else {
-                    run_cli(&["fan", &target_arg, &mode_arg])
-                }
+                    vec!["fan", target_arg.as_str(), mode_arg.as_str()]
+                };
+                daemon_write_or_cli(&requests, &args)
             },
             move |obj, result| match result {
                 Ok(_) => {
@@ -1088,12 +1489,46 @@ impl qobject::ControlCenter {
         }
         self.as_mut().set_charge_busy(true);
         self.run_async(
-            || (run_cli(&["charge", "--help"]), run_cli(&["charge"])),
-            |mut obj, (help, status)| {
-                let help = help.unwrap_or_default();
-                obj.as_mut().set_charge_presets(charge_presets(&help));
-                obj.as_mut().set_custom_charge_supported(supports_charge_range(&help));
-                obj.as_mut().set_charge_status(qstring(battery_details(&status.unwrap_or_default())));
+            || {
+                read_daemon(
+                    |client| {
+                        let caps = match daemon_response(
+                            client,
+                            ipc::IpcRequest::DaemonCommand(ipc::DaemonCommand::GetCapabilities),
+                        )? {
+                            ipc::IpcResponse::Capabilities(caps) => caps,
+                            _ => return Err("backend.error.unexpected_capabilities".to_owned()),
+                        };
+                        let status = match daemon_response(client, ipc::IpcRequest::GetChargeStatus)? {
+                            ipc::IpcResponse::ChargeStatus(status) => status,
+                            _ => return Err("backend.error.unexpected_charge_status".to_owned()),
+                        };
+                        Ok((
+                            charge_presets_from_caps(&caps),
+                            caps.charge.custom_range.is_some(),
+                            charge_status_summary(&status),
+                        ))
+                    },
+                    || {
+                        let help = run_cli(&["charge", "--help"]).unwrap_or_default();
+                        let status = run_cli(&["charge"]).unwrap_or_default();
+                        Ok((
+                            charge_presets(&help),
+                            supports_charge_range(&help),
+                            battery_details(&status).to_owned(),
+                        ))
+                    },
+                )
+            },
+            |mut obj, result| {
+                match result {
+                    Ok((presets, supports_custom, status)) => {
+                        obj.as_mut().set_charge_presets(presets);
+                        obj.as_mut().set_custom_charge_supported(supports_custom);
+                        obj.as_mut().set_charge_status(qstring(status));
+                    }
+                    Err(error) => obj.as_mut().set_error_message(qstring(error)),
+                }
                 obj.set_charge_busy(false);
             },
         );
@@ -1106,18 +1541,25 @@ impl qobject::ControlCenter {
             self.fail("backend.error.unsupported_charge_mode");
             return;
         }
-        self.apply_charge([preset]);
+        self.apply_charge(ChargeAction::Preset(preset));
     }
 
     pub fn apply_charge_range(mut self: Pin<&mut Self>, min: i32, max: i32) {
-        let Some(args) = charge_range_args(min, max).filter(|_| self.custom_charge_supported) else {
+        if !self.custom_charge_supported {
+            self.as_mut().set_error_message(qstring("charge.invalidRange"));
+            return;
+        }
+        let Some([_, min, _, max]) = charge_range_args(min, max) else {
             self.as_mut().set_error_message(qstring("charge.invalidRange"));
             return;
         };
-        self.apply_charge(args);
+        self.apply_charge(ChargeAction::Range(
+            min.parse().unwrap_or_default(),
+            max.parse().unwrap_or_default(),
+        ));
     }
 
-    fn apply_charge<const N: usize>(mut self: Pin<&mut Self>, args: [String; N]) {
+    fn apply_charge(mut self: Pin<&mut Self>, action: ChargeAction) {
         if self.charge_busy {
             return;
         }
@@ -1125,8 +1567,13 @@ impl qobject::ControlCenter {
         self.as_mut().begin();
         self.run_async(
             move || {
-                let args: Vec<_> = std::iter::once("charge").chain(args.iter().map(String::as_str)).collect();
-                run_cli(&args).map(|_| run_cli(&["charge"]).unwrap_or_default())
+                let legacy_args = match &action {
+                    ChargeAction::Preset(preset) => vec![preset.clone()],
+                    ChargeAction::Range(min, max) => {
+                        vec!["--min".into(), min.to_string(), "--max".into(), max.to_string()]
+                    }
+                };
+                apply_charge_native_or_cli(action, legacy_args)
             },
             |mut obj, result| {
                 obj.as_mut().set_charge_busy(false);
@@ -1144,21 +1591,15 @@ impl qobject::ControlCenter {
         );
     }
 
-    pub fn apply_keyboard_level(mut self: Pin<&mut Self>, level: i32) {
+    pub fn apply_keyboard_level(self: Pin<&mut Self>, level: i32) {
         let mode = match level.clamp(0, 3) {
             0 => "off",
             1 => "low",
             2 => "medium",
             _ => "high",
         };
-        self.as_mut().begin();
-        self.run_async(
-            move || run_cli(&["kbd", mode]),
-            |obj, result| match result {
-                Ok(_) => obj.finish("backend.status.keyboard_applied"),
-                Err(error) => obj.fail(error),
-            },
-        );
+        let mode = mode.to_owned();
+        self.apply_keyboard_mode(&qstring(mode), 0);
     }
 
     pub fn apply_keyboard_mode(mut self: Pin<&mut Self>, mode: &QString, pwm: i32) {
@@ -1172,11 +1613,15 @@ impl qobject::ControlCenter {
         let mode_arg = mode.clone();
         self.run_async(
             move || {
-                if mode_arg == "custom" {
-                    run_cli(&["kbd", &mode_arg, &pwm_text])
+                let Some(request) = keyboard_request(&mode_arg, pwm) else {
+                    return Err("backend.error.unsupported_keyboard_mode".to_owned());
+                };
+                let args = if mode_arg == "custom" {
+                    vec!["kbd", mode_arg.as_str(), pwm_text.as_str()]
                 } else {
-                    run_cli(&["kbd", &mode_arg])
-                }
+                    vec!["kbd", mode_arg.as_str()]
+                };
+                daemon_write_or_cli(&[request], &args)
             },
             |obj, result| match result {
                 Ok(_) => obj.finish("backend.status.keyboard_applied"),
@@ -1200,15 +1645,21 @@ impl qobject::ControlCenter {
         preset: &QString,
         sleep: bool,
     ) {
-        let Some(args) = led_args(&mode.to_string(), value, &preset.to_string(), sleep) else {
+        let mode = mode.to_string();
+        let preset = preset.to_string();
+        let Some(args) = led_args(&mode, value, &preset, sleep) else {
             self.as_mut().set_error_message(qstring("backend.error.unsupported_led_mode"));
             return;
         };
         self.as_mut().begin();
         self.run_async(
             move || {
+                let Some(request) = led_request(&mode, value, &preset, sleep) else {
+                    let args: Vec<_> = args.iter().map(String::as_str).collect();
+                    return run_cli(&args).map(|_| ());
+                };
                 let args: Vec<_> = args.iter().map(String::as_str).collect();
-                run_cli(&args)
+                daemon_write_or_cli(&[request], &args)
             },
             |mut obj, result| match result {
                 Ok(_) => obj.finish("backend.status.led_applied"),
@@ -1224,6 +1675,76 @@ impl qobject::ControlCenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_sensor_responses_map_to_gui_properties() {
+        assert_eq!(daemon_temperatures(ipc::IpcResponse::Temps { cpu_c: 97, sys_c: 37 }).unwrap(), (97, 37));
+        assert_eq!(daemon_fans(ipc::IpcResponse::FanRpm { cpu: 5615, gpu: 5875 }).unwrap(), (5615, 5875));
+        assert_eq!(daemon_temperatures(ipc::IpcResponse::Success), Err("backend.error.parse_temps".into()));
+        assert_eq!(daemon_fans(ipc::IpcResponse::Success), Err("backend.error.parse_fans".into()));
+    }
+
+    #[test]
+    fn power_and_fan_modes_map_to_native_requests() {
+        assert!(matches!(power_request("silent"), Some(ipc::IpcRequest::SetPowerProfile(_))));
+        assert!(power_request("invalid").is_none());
+        assert!(matches!(
+            fan_requests("cpu", "turbo", 0).unwrap()[0],
+            ipc::IpcRequest::SetFanMode {
+                fan: lecoo_types::ec_types::FanIndex::Cpu,
+                mode: lecoo_types::ec_types::FanMode::Turbo,
+            }
+        ));
+        assert!(matches!(
+            fan_requests("both", "custom", 255).unwrap()[1],
+            ipc::IpcRequest::SetFanMode {
+                fan: lecoo_types::ec_types::FanIndex::Gpu,
+                mode: lecoo_types::ec_types::FanMode::Custom(220),
+            }
+        ));
+        assert!(fan_requests("cpu", "invalid", 0).is_none());
+    }
+
+    #[test]
+    fn keyboard_and_led_modes_map_to_native_requests() {
+        assert!(matches!(
+            keyboard_request("custom", 255),
+            Some(ipc::IpcRequest::SetKeyboardBacklight(
+                lecoo_types::ec_types::KeyboardBacklightLevel::Custom(255)
+            ))
+        ));
+        assert!(matches!(
+            led_request("breath", 0, "smooth", false),
+            Some(ipc::IpcRequest::SetLedMode(lecoo_types::ec_types::PowerLedMode::Animation(
+                lecoo_types::ec_types::BreathConfig::SMOOTH
+            )))
+        ));
+        assert!(matches!(
+            led_request("breath", 0, "sleep", true),
+            Some(ipc::IpcRequest::DaemonCommand(ipc::DaemonCommand::SetLedOnSleep(
+                lecoo_types::ec_types::PowerLedMode::Animation(lecoo_types::ec_types::BreathConfig::SLEEP)
+            )))
+        ));
+        assert!(matches!(
+            led_request("overheat", 95, "", false),
+            Some(ipc::IpcRequest::DaemonCommand(ipc::DaemonCommand::SetOverheatAlert(Some(95))))
+        ));
+        assert!(led_request("unknown", 0, "", false).is_none());
+    }
+
+    #[test]
+    fn native_daemon_read_smoke_when_available() {
+        let Ok(mut client) = ipc::IpcClient::connect() else {
+            return;
+        };
+        let info = daemon_response(&mut client, ipc::IpcRequest::GetSystemState).unwrap();
+        assert!(matches!(info, ipc::IpcResponse::SystemInfo(_)));
+        let temps = daemon_response(&mut client, ipc::IpcRequest::GetTemperatures).unwrap();
+        let fans = daemon_response(&mut client, ipc::IpcRequest::GetFansRPM).unwrap();
+        let (cpu, system) = daemon_temperatures(temps).unwrap();
+        let (cpu_fan, gpu_fan) = daemon_fans(fans).unwrap();
+        assert!(cpu >= 0 && system >= 0 && cpu_fan >= 0 && gpu_fan >= 0);
+    }
 
     #[test]
     fn charge_range_requires_supported_bounds_and_order() {
@@ -1299,24 +1820,6 @@ mod tests {
             monitoring_values("🌡️ CPU: 50°C, Sys: 37°C | 💨 Fans: 2867 RPM (CPU), 2994 RPM (GPU)"),
             Some((50, 37, 2867, 2994))
         );
-    }
-
-    #[test]
-    fn version_banner_keeps_only_the_version() {
-        assert_eq!(version_from_banner("lecoo-ctrl v0.6.0"), "0.6.0");
-        assert_eq!(version_from_banner("lecoo-ctrl v0.6.0-beta"), "0.6.0-beta");
-        assert_eq!(version_from_banner("lecoo-ctrl 1.2.3"), "1.2.3");
-        assert_eq!(version_from_banner("lecoo-ctrl v2"), "2");
-        assert_eq!(version_from_banner(""), "");
-        // A trailing token that is not a version must survive untouched.
-        assert_eq!(version_from_banner("vendor"), "vendor");
-    }
-
-    #[test]
-    fn resolved_cli_path_points_at_a_file() {
-        if let Some(path) = resolve_cli_path() {
-            assert!(path.is_file(), "resolved CLI path must exist: {}", path.display());
-        }
     }
 
     #[test]

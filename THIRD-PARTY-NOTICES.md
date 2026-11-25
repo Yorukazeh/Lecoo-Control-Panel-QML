@@ -6,7 +6,7 @@ This file records third-party components and runtime dependencies with their app
 
 ## External runtime dependency
 
-The GUI invokes `lecoo-ctrl` and `lecoo-ec-daemon` as separate processes; neither is linked into or bundled with the GUI. They are provided by [Lecoo-Control-Center](https://github.com/LaVashikk/Lecoo-Control-Center), licensed under MIT. Its license text appears below.
+The GUI links the MIT-licensed `ipc` and `lecoo-types` crates from [Lecoo-Control-Center](https://github.com/LaVashikk/Lecoo-Control-Center). The upstream `lecoo-ctrl` and `lecoo-ec-daemon` executables are separate and are not bundled with the GUI. The upstream MIT license appears below.
 
 ## Components
 
@@ -117,7 +117,7 @@ SPDX-License-Identifier: Apache-2.0
 - **Apache-2.0** (Material Icons Round, the Rust dependencies, and the vendored
   `MaterialColorUtilities.js`) — [`assets/fonts/Apache-2.0-MaterialIcons.txt`](assets/fonts/Apache-2.0-MaterialIcons.txt).
 - **SIL OFL-1.1** (Noto Sans SC) — [`assets/fonts/OFL-NotoSansSC.txt`](assets/fonts/OFL-NotoSansSC.txt).
-- **MIT** (Rust dependencies and the external Lecoo-Control-Center CLI/daemon) — texts below.
+- **MIT** (Lecoo-Control-Center IPC/types crates, CLI, and daemon) — text below.
 - **Zlib** (the Rust dependencies that opt for it) — text below.
 - **Unicode-3.0** (the Rust dependency that requires it) — text below.
 
@@ -143,7 +143,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-MIT License for the external Lecoo-Control-Center CLI and daemon:
+MIT License for the Lecoo-Control-Center IPC and types crates, CLI, and daemon:
 
 ```text
 MIT License
