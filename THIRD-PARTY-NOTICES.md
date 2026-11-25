@@ -1,6 +1,6 @@
 # Third-party notices
 
-`Lecoo-Control-Panel-QML` (`0.3.0`) is licensed under **GPL-3.0-only**; see [LICENSE](LICENSE).
+`Lecoo-Control-Panel-QML` (`0.3.1`) is licensed under **GPL-3.0-only**; see [LICENSE](LICENSE).
 
 This file records third-party components and runtime dependencies with their applicable licenses. Keep it with source and binary distributions.
 
